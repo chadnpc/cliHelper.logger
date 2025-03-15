@@ -1,6 +1,96 @@
-﻿
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
+using namespace System.Collections.Generic
 #region    Classes
+enum LoggingEventType {
+  Debug
+  Information
+  Warning
+  Error
+  Fatal
+}
+
+class ILoggerAppender {
+  [void]log([ILoggerEntry]$entry) { }
+}
+class ILogger {
+  [List[ILoggerAppender]]$appenders
+  [Type]$logEntryType
+  [void]debug([String]$message) { }
+  [void]information([String]$message) { }
+  [void]warning([String]$message) { }
+  [void]error([String]$message) { }
+  [void]fatal([String]$message) { }
+}
+
+class ILoggerEntry {
+  [ValidatePattern('\w')]
+  [LoggingEventType]$severity
+
+  [ValidateNotNullOrEmpty()]
+  [String]$message
+  [Exception]$exception = $null
+
+  static [ILoggerEntry]yield([String]$text) { throw }
+}
+
+class LoggerEntry: ILoggerEntry {
+  static [ILoggerEntry]yield([String]$text) {
+    return [ILoggerEntry]@{
+      severity = [LoggingEventType]::((Get-PSCallStack)[$true].functionName)
+      message  = $text
+    }
+  }
+}
+
+class LoggerEntryTrimmed: ILoggerEntry {
+  static [ILoggerEntry]yield([String]$text) {
+    return [ILoggerEntry]@{
+      severity = [LoggingEventType]::((Get-PSCallStack)[$true].functionName)
+      message  = $text.trim()
+    }
+  }
+}
+
+class AppVeyorAppender: iloggerappender {
+  [void]log([ILoggerEntry]$entry) {
+    $entry.severity = switch ($entry.severity) {
+            ([LoggingEventType]::Debug) { [LoggingEventType]::Information }
+            ([LoggingEventType]::Fatal) { [LoggingEventType]::Error }
+      default { $entry.severity }
+    }
+
+    Add-AppveyorMessage $entry.message -Category ([String]$entry.severity)
+  }
+}
+
+class ColoredConsoleAppender: ILoggerAppender {
+  static $debugColor = [ConsoleColor]::DarkYellow
+  static $informationColor = [ConsoleColor]::DarkGreen
+  static $warningColor = [ConsoleColor]::Yellow
+  static $errorColor = [ConsoleColor]::Red
+  static $fatalColor = [ConsoleColor]::Red
+
+  [void]log([ILoggerEntry]$entry) {
+    $member = '{0}Color' -f $entry.severity
+    $color = [ColoredConsoleAppender]::$member
+
+    $message = '{0}:{1}' -f $entry.severity.toString().toUpper(), $entry.message
+
+    # Format-Color cr lpad rpad black on darkyellow (Get-Date) print `
+    #   $color on black $message print cr
+
+  }
+}
+
+class FileAppender: ILoggerAppender {
+
+  [String]$logPath
+
+  [void]log([ILoggerEntry]$entry) {
+    $message = ('{0}:{1}:{2}' -f (Get-Date), $entry.severity.toString().toUpper(), $entry.message)
+    Add-Content -Path $this.logPath -Value $message
+  }
+}
 class LogEntry {
   [ValidateNotNullOrEmpty()][string]$Value
   [ValidateNotNull()][datetime]$Time = [datetime]::UtcNow
@@ -44,6 +134,8 @@ class LogResource : LogEntry {
 class Logger : IDisposable {
   [guid]$SessionId
   [string]$LogPath
+  [List[ILoggerAppender]]$appenders
+  [Type]$logEntryType = [LoggerEntry]
   [bool]$IsDisposed = $false
   [System.IO.StreamWriter]$StreamWriter
   [System.Collections.ArrayList]$LogEntries
@@ -51,10 +143,13 @@ class Logger : IDisposable {
   static [string]$DefaultLogDirectory = "$pwd\Logs"
 
 
-  Logger() { }
+  Logger() {
+    $this.appenders = New-Object List[ILoggerAppender]
+  }
 
   Logger([string]$LogDirectory) {
     $this.SessionId = [guid]::NewGuid()
+    $this.appenders = New-Object List[ILoggerAppender]
     $this.LogEntries = [System.Collections.ArrayList]::Synchronized([System.Collections.ArrayList]::new())
 
     if (-not (Test-Path $LogDirectory)) {
@@ -83,6 +178,16 @@ class Logger : IDisposable {
     $this.LogEntries.Add($Entry) | Out-Null
     $this.StreamWriter.WriteLine($Entry.ToString())
   }
+
+  [void]log([ILoggerEntry]$entry) {
+    $this.appenders | ForEach-Object { $_.log([ILoggerEntry]$entry) }
+  }
+
+  [void] debug([String]$message) { $this.log($this.logEntryType::yield($message)) }
+  [void] information([String]$message) { $this.log($this.logEntryType::yield($message)) }
+  [void] warning([String]$message) { $this.log($this.logEntryType::yield($message)) }
+  [void] error([String]$message) { $this.log($this.logEntryType::yield($message)) }
+  [void] fatal([String]$message) { $this.log($this.logEntryType::yield($message)) }
 
   [void] Dispose() {
     if (!$this.IsDisposed) {
