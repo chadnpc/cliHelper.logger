@@ -16,7 +16,29 @@ then
 
 ```PowerShell
 Import-Module logger
-# do stuff here.
+$logger = [Logger]::new()
+$logger.Append([ColoredConsoleAppender]::new())
+$logger.Append([FileAppender]::new("mylog.log"))
+
+$logger.Information("System initialized")
+$logger.Error("Something went wrong", [Exception]::new("Test error"))
+$logger.Dispose()
+
+# Custom entry type
+class VerboseEntry : ILoggerEntry {
+    static [ILoggerEntry] Yield([string]$message) {
+        return [VerboseEntry]@{
+            Severity  = [LoggingEventType]::Debug
+            Message   = "[VERBOSE] $message"
+            Timestamp = [datetime]::UtcNow
+        }
+    }
+}
+
+$customLogger = [Logger]::new()
+$customLogger.EntryType = [VerboseEntry]
+$customLogger.Append([ColoredConsoleAppender]::new())
+$customLogger.Debug("Detailed debug information")
 ```
 
 ## License
