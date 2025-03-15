@@ -1,6 +1,10 @@
 ﻿#!/usr/bin/env pwsh
+
+using namespace System.IO
+using namespace System.Text
+using namespace System.Threading
 using namespace System.Collections.Generic
-#region    Classes
+
 enum LoggingEventType {
   Debug
   Information
@@ -10,200 +14,146 @@ enum LoggingEventType {
 }
 
 class ILoggerAppender {
-  [void]log([ILoggerEntry]$entry) { }
-}
-class ILogger {
-  [List[ILoggerAppender]]$appenders
-  [Type]$logEntryType
-  [void]debug([String]$message) { }
-  [void]information([String]$message) { }
-  [void]warning([String]$message) { }
-  [void]error([String]$message) { }
-  [void]fatal([String]$message) { }
+  [void] Log([ILoggerEntry]$entry) { }
 }
 
 class ILoggerEntry {
-  [ValidatePattern('\w')]
-  [LoggingEventType]$severity
+  [LoggingEventType]$Severity
+  [string]$Message
+  [Exception]$Exception
+  [datetime]$Timestamp = [datetime]::UtcNow
 
-  [ValidateNotNullOrEmpty()]
-  [String]$message
-  [Exception]$exception = $null
-
-  static [ILoggerEntry]yield([String]$text) { throw }
+  static [ILoggerEntry] Yield([string]$message) { throw "Not implemented" }
 }
 
-class LoggerEntry: ILoggerEntry {
-  static [ILoggerEntry]yield([String]$text) {
-    return [ILoggerEntry]@{
-      severity = [LoggingEventType]::((Get-PSCallStack)[$true].functionName)
-      message  = $text
+class LoggerEntry : ILoggerEntry {
+  static [ILoggerEntry] Yield([string]$message) {
+    $caller = (Get-PSCallStack)[2].Command
+    $severity = [LoggingEventType]::$caller
+    return [LoggerEntry]@{
+      Severity  = $severity
+      Message   = $message
+      Timestamp = [datetime]::UtcNow
     }
   }
 }
 
-class LoggerEntryTrimmed: ILoggerEntry {
-  static [ILoggerEntry]yield([String]$text) {
-    return [ILoggerEntry]@{
-      severity = [LoggingEventType]::((Get-PSCallStack)[$true].functionName)
-      message  = $text.trim()
-    }
-  }
-}
-
-class AppVeyorAppender: iloggerappender {
-  [void]log([ILoggerEntry]$entry) {
-    $entry.severity = switch ($entry.severity) {
-            ([LoggingEventType]::Debug) { [LoggingEventType]::Information }
-            ([LoggingEventType]::Fatal) { [LoggingEventType]::Error }
-      default { $entry.severity }
-    }
-
-    Add-AppveyorMessage $entry.message -Category ([String]$entry.severity)
-  }
-}
-
-class ColoredConsoleAppender: ILoggerAppender {
-  static $debugColor = [ConsoleColor]::DarkYellow
-  static $informationColor = [ConsoleColor]::DarkGreen
-  static $warningColor = [ConsoleColor]::Yellow
-  static $errorColor = [ConsoleColor]::Red
-  static $fatalColor = [ConsoleColor]::Red
-
-  [void]log([ILoggerEntry]$entry) {
-    $member = '{0}Color' -f $entry.severity
-    $color = [ColoredConsoleAppender]::$member
-
-    $message = '{0}:{1}' -f $entry.severity.toString().toUpper(), $entry.message
-
-    # Format-Color cr lpad rpad black on darkyellow (Get-Date) print `
-    #   $color on black $message print cr
-
-  }
-}
-
-class FileAppender: ILoggerAppender {
-
-  [String]$logPath
-
-  [void]log([ILoggerEntry]$entry) {
-    $message = ('{0}:{1}:{2}' -f (Get-Date), $entry.severity.toString().toUpper(), $entry.message)
-    Add-Content -Path $this.logPath -Value $message
-  }
-}
-class LogEntry {
-  [ValidateNotNullOrEmpty()][string]$Value
-  [ValidateNotNull()][datetime]$Time = [datetime]::UtcNow
-
-  LogEntry([string]$Value) {
-    $this.Value = $Value
-  }
-
-  LogEntry([string]$Value, [datetime]$Time) {
-    $this.Value = $Value
-    $this.Time = $Time
-  }
-
-  static [LogEntry] Parse([string]$LogString) {
-    if ($LogString -match '^\[(?<time>.+?)\]\s(?<value>.*)$') {
-      return [LogEntry]::new(
-        $matches['value'],
-        [datetime]::Parse($matches['time'])
-      )
-    }
-    throw "Invalid log format: $LogString"
-  }
-
-  [string] ToString() {
-    return '[{0:u}] {1}' -f $this.Time, $this.Value
-  }
-}
-
-class LogResource : LogEntry {
-  [string]$ResourceType
-
-  LogResource([object]$Object) : base($Object.ToString(), [datetime]::UtcNow) {
-    $this.ResourceType = $Object.GetType().Name
-  }
-
-  [string] ToString() {
-    return '[{0:u}] [{1}] {2}' -f $this.Time, $this.ResourceType, $this.Value
-  }
-}
-
-class Logger : IDisposable {
-  [guid]$SessionId
-  [string]$LogPath
-  [List[ILoggerAppender]]$appenders
-  [Type]$logEntryType = [LoggerEntry]
-  [bool]$IsDisposed = $false
-  [System.IO.StreamWriter]$StreamWriter
-  [System.Collections.ArrayList]$LogEntries
-  static [System.Collections.Hashtable]$LogSessions = [System.Collections.Hashtable]::Synchronized(@{})
+class BaseLogger : System.IDisposable {
+  [List[ILoggerAppender]]$Appenders = [List[ILoggerAppender]]::new()
+  [Type]$EntryType = [LoggerEntry]
+  [guid]$SessionId = [guid]::NewGuid()
+  [string]$LogDirectory
+  [StreamWriter]$StreamWriter
+  static [Hashtable]$Sessions = [Hashtable]::Synchronized(@{})
   static [string]$DefaultLogDirectory = "$pwd\Logs"
 
+  BaseLogger() { }
 
-  Logger() {
-    $this.appenders = New-Object List[ILoggerAppender]
+  BaseLogger([string]$logDirectory) {
+    $this.LogDirectory = $logDirectory
+    $this.Initialize()
   }
 
-  Logger([string]$LogDirectory) {
-    $this.SessionId = [guid]::NewGuid()
-    $this.appenders = New-Object List[ILoggerAppender]
-    $this.LogEntries = [System.Collections.ArrayList]::Synchronized([System.Collections.ArrayList]::new())
-
-    if (-not (Test-Path $LogDirectory)) {
-      New-Item -Path $LogDirectory -ItemType Directory -Force | Out-Null
+  [void] Initialize() {
+    if (-not (Test-Path $this.LogDirectory)) {
+      New-Item -Path $this.LogDirectory -ItemType Directory -Force | Out-Null
     }
 
-    $this.LogPath = Join-Path $LogDirectory "Log_$($this.SessionId).log"
-    $this.StreamWriter = [System.IO.StreamWriter]::new($this.LogPath)
-
-    [Logger]::LogSessions[$this.SessionId] = $this.LogEntries
+    $logPath = Join-Path $this.LogDirectory "Log_$($this.SessionId).log"
+    $this.StreamWriter = [StreamWriter]::new($logPath)
+    [BaseLogger]::Sessions[$this.SessionId] = $this
   }
 
-  [void] Log([string]$Message) {
-    $this.AddLogEntry([LogEntry]::new($Message))
+  [void] Log([LoggingEventType]$severity, [string]$message, [Exception]$exception) {
+    $entry = $this.CreateEntry($severity, $message, $exception)
+    $this.ProcessEntry($entry)
   }
 
-  [void] LogObject([object]$Object) {
-    $this.AddLogEntry([LogResource]::new($Object))
+  [ILoggerEntry] CreateEntry([LoggingEventType]$severity, [string]$message, [Exception]$exception) {
+    return $this.EntryType::Yield($message, $exception)
   }
 
-  [void] AddLogEntry([LogEntry]$Entry) {
-    if ($this.IsDisposed) {
-      throw "Cannot log to disposed Logger"
+  [void] ProcessEntry([ILoggerEntry]$entry) {
+    $this.StreamWriter.WriteLine("[{0:u}] [{1}] {2}" -f
+      $entry.Timestamp, $entry.Severity, $entry.Message)
+
+    foreach ($appender in $this.Appenders) {
+      try {
+        $appender.Log($entry)
+      } catch {
+        Write-Error "Appender error: $_"
+      }
     }
-
-    $this.LogEntries.Add($Entry) | Out-Null
-    $this.StreamWriter.WriteLine($Entry.ToString())
   }
-
-  [void]log([ILoggerEntry]$entry) {
-    $this.appenders | ForEach-Object { $_.log([ILoggerEntry]$entry) }
-  }
-
-  [void] debug([String]$message) { $this.log($this.logEntryType::yield($message)) }
-  [void] information([String]$message) { $this.log($this.logEntryType::yield($message)) }
-  [void] warning([String]$message) { $this.log($this.logEntryType::yield($message)) }
-  [void] error([String]$message) { $this.log($this.logEntryType::yield($message)) }
-  [void] fatal([String]$message) { $this.log($this.logEntryType::yield($message)) }
 
   [void] Dispose() {
-    if (!$this.IsDisposed) {
+    if ($this.StreamWriter) {
       $this.StreamWriter.Flush()
-      $this.StreamWriter.Close()
       $this.StreamWriter.Dispose()
-      [Logger]::LogSessions.Remove($this.SessionId)
-      $this.IsDisposed = $true
     }
-  }
-
-  [string] GetSessionLogs() {
-    return $this.LogEntries -join "`n"
+    [BaseLogger]::Sessions.Remove($this.SessionId)
   }
 }
-#endregion Classes
+
+class Logger : BaseLogger {
+  Logger() : base() { }
+  Logger([string]$logDirectory) : base($logDirectory) { }
+
+  [void] Debug([string]$message) { $this.Log([LoggingEventType]::Debug, $message, $null) }
+  [void] Information([string]$message) { $this.Log([LoggingEventType]::Information, $message, $null) }
+  [void] Warning([string]$message) { $this.Log([LoggingEventType]::Warning, $message, $null) }
+  [void] Error([string]$message, [Exception]$ex) { $this.Log([LoggingEventType]::Error, $message, $ex) }
+  [void] Fatal([string]$message, [Exception]$ex) { $this.Log([LoggingEventType]::Fatal, $message, $ex) }
+}
+
+class ColoredConsoleAppender : ILoggerAppender {
+  static [hashtable]$ColorMap = @{
+    Debug       = [ConsoleColor]::DarkGray
+    Information = [ConsoleColor]::Green
+    Warning     = [ConsoleColor]::Yellow
+    Error       = [ConsoleColor]::Red
+    Fatal       = [ConsoleColor]::Magenta
+  }
+
+  [void] Log([ILoggerEntry]$entry) {
+    $color = [ColoredConsoleAppender]::ColorMap[$entry.Severity.ToString()]
+    $message = "[{0}] {1}" -f $entry.Severity.ToString().ToUpper(), $entry.Message
+    Write-Host $message -ForegroundColor $color
+  }
+}
+
+class FileAppender : ILoggerAppender {
+  [StreamWriter]$Writer
+  [ReaderWriterLockSlim]$Lock = [ReaderWriterLockSlim]::new()
+
+  FileAppender([string]$path) {
+    $this.Writer = [StreamWriter]::new($path, [Encoding]::UTF8)
+  }
+
+  [void] Log([ILoggerEntry]$entry) {
+    $this.Lock.EnterWriteLock()
+    try {
+      $this.Writer.WriteLine("[{0:u}] [{1}] {2}" -f
+        $entry.Timestamp, $entry.Severity, $entry.Message)
+    } finally {
+      $this.Lock.ExitWriteLock()
+    }
+  }
+  [void] Dispose() {
+    $this.Writer.Dispose()
+    $this.Lock.Dispose()
+  }
+}
+
+# Export types and setup accelerators
+$exportTypes = [Logger], [ILoggerEntry], [LoggingEventType], [ColoredConsoleAppender], [FileAppender]
+$accelerators = [PSObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')
+
+$exportTypes | ForEach-Object {
+  if (-not $accelerators::Get.ContainsKey($_.FullName)) {
+    $accelerators::Add($_.FullName, $_)
+  }
+}
 # Types that will be available to users when they import the module.
 $typestoExport = @(
   [LogEntry], [LogResource], [Logger]
@@ -228,6 +178,67 @@ $MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
     $TypeAcceleratorsClass::Remove($Type.FullName)
   }
 }.GetNewClosure();
+
+
+<# Usage examples (what I envision it will look when completed)
+
+>> Installing of the sdk will be done as a module
+
+```powershell
+PS> Install-Module Logger
+```
+
+```powershell
+using module Logger
+
+$logger = New-Object Logger
+$logger.appenders.add([Logger.ColoredConsoleAppender]@{ })
+$logger.appenders.add([Logger.FileAppender]@{ logPath = ('{0}\Logs\miner.log' -f $PSScriptRoot) })
+
+$logger.error('ColoredConsole Appender')
+```
+
+```powershell
+using module Logger
+
+class CustomEntry: Logger.ILoggerEntry
+{
+    static [Logger.ILoggerEntry]yield([String]$text)
+    {
+        return [Logger.ILoggerEntry]@{
+            severity = [Logger.LoggingEventType]::((Get-PSCallStack)[$true].functionName)
+            message = '{1}xxx {0} xxx{1}' -f $text, [Environment]::NewLine
+        }
+    }
+}
+
+$logger = New-Object Logger
+$logger.logEntryType = [CustomEntry]
+$logger.appenders.add([Logger.ColoredConsoleAppender]@{ })
+
+$logger.error('Custom Entry')
+```
+
+```powershell
+using module Logger
+
+class CustomAppender: Logger.ILoggerAppender
+{
+    [void]log([Logger.ILoggerEntry]$entry)
+    {
+        Write-Host $entry.message -ForegroundColor Blue
+    }
+}
+
+$logger = New-Object Logger
+$logger.appenders.add([CustomAppender]@{ })
+
+$logger.error('Custom Appender')
+```
+#>
+
+
+
 
 $scripts = @();
 $Public = Get-ChildItem "$PSScriptRoot/Public" -Filter "*.ps1" -Recurse -ErrorAction SilentlyContinue
