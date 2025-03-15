@@ -5,7 +5,7 @@ using namespace System.Text
 using namespace System.Threading
 using namespace System.Collections.Generic
 
-enum LoggingEventType {
+enum LogEventType {
   Debug
   Information
   Warning
@@ -18,7 +18,7 @@ class ILoggerAppender {
 }
 
 class ILoggerEntry {
-  [LoggingEventType]$Severity
+  [LogEventType]$Severity
   [string]$Message
   [Exception]$Exception
   [datetime]$Timestamp = [datetime]::UtcNow
@@ -29,7 +29,7 @@ class ILoggerEntry {
 class LoggerEntry : ILoggerEntry {
   static [ILoggerEntry] Yield([string]$message) {
     $caller = (Get-PSCallStack)[2].Command
-    $severity = [LoggingEventType]::$caller
+    $severity = [LogEventType]::$caller
     return [LoggerEntry]@{
       Severity  = $severity
       Message   = $message
@@ -38,7 +38,7 @@ class LoggerEntry : ILoggerEntry {
   }
 }
 
-class BaseLogger : System.IDisposable {
+class BaseLogger : IDisposable {
   [List[ILoggerAppender]]$Appenders = [List[ILoggerAppender]]::new()
   [Type]$EntryType = [LoggerEntry]
   [guid]$SessionId = [guid]::NewGuid()
@@ -64,12 +64,12 @@ class BaseLogger : System.IDisposable {
     [BaseLogger]::Sessions[$this.SessionId] = $this
   }
 
-  [void] Log([LoggingEventType]$severity, [string]$message, [Exception]$exception) {
+  [void] Log([LogEventType]$severity, [string]$message, [Exception]$exception) {
     $entry = $this.CreateEntry($severity, $message, $exception)
     $this.ProcessEntry($entry)
   }
 
-  [ILoggerEntry] CreateEntry([LoggingEventType]$severity, [string]$message, [Exception]$exception) {
+  [ILoggerEntry] CreateEntry([LogEventType]$severity, [string]$message, [Exception]$exception) {
     return $this.EntryType::Yield($message, $exception)
   }
 
@@ -99,14 +99,14 @@ class Logger : BaseLogger {
   Logger() : base() { }
   Logger([string]$logDirectory) : base($logDirectory) { }
 
-  [void] Debug([string]$message) { $this.Log([LoggingEventType]::Debug, $message, $null) }
-  [void] Information([string]$message) { $this.Log([LoggingEventType]::Information, $message, $null) }
-  [void] Warning([string]$message) { $this.Log([LoggingEventType]::Warning, $message, $null) }
-  [void] Error([string]$message, [Exception]$ex) { $this.Log([LoggingEventType]::Error, $message, $ex) }
-  [void] Fatal([string]$message, [Exception]$ex) { $this.Log([LoggingEventType]::Fatal, $message, $ex) }
+  [void] Debug([string]$message) { $this.Log([LogEventType]::Debug, $message, $null) }
+  [void] Information([string]$message) { $this.Log([LogEventType]::Information, $message, $null) }
+  [void] Warning([string]$message) { $this.Log([LogEventType]::Warning, $message, $null) }
+  [void] Error([string]$message, [Exception]$ex) { $this.Log([LogEventType]::Error, $message, $ex) }
+  [void] Fatal([string]$message, [Exception]$ex) { $this.Log([LogEventType]::Fatal, $message, $ex) }
 }
 
-class ColoredConsoleAppender : ILoggerAppender {
+class ConsoleAppender : ILoggerAppender {
   static [hashtable]$ColorMap = @{
     Debug       = [ConsoleColor]::DarkGray
     Information = [ConsoleColor]::Green
@@ -116,12 +116,38 @@ class ColoredConsoleAppender : ILoggerAppender {
   }
 
   [void] Log([ILoggerEntry]$entry) {
-    $color = [ColoredConsoleAppender]::ColorMap[$entry.Severity.ToString()]
+    $color = [ConsoleAppender]::ColorMap[$entry.Severity.ToString()]
     $message = "[{0}] {1}" -f $entry.Severity.ToString().ToUpper(), $entry.Message
     Write-Host $message -ForegroundColor $color
   }
 }
 
+class JsonAppender : ILoggerAppender {
+  [string]$FilePath
+  [System.IO.StreamWriter]$Writer
+
+  JsonAppender([string]$Path) {
+    $this.FilePath = $Path
+    $this.Writer = [System.IO.StreamWriter]::new($Path)
+  }
+
+  [void] Log([ILoggerEntry]$entry) {
+    $logObject = [ordered]@{
+      timestamp = $entry.Timestamp.ToString('o')
+      severity  = $entry.Severity.ToString()
+      message   = $entry.Message
+      exception = if ($entry.Exception) { $entry.Exception.ToString() }
+    }
+
+    $this.Writer.WriteLine(($logObject | ConvertTo-Json -Compress))
+  }
+
+  [void] Dispose() {
+    if ($this.Writer) {
+      $this.Writer.Dispose()
+    }
+  }
+}
 class FileAppender : ILoggerAppender {
   [StreamWriter]$Writer
   [ReaderWriterLockSlim]$Lock = [ReaderWriterLockSlim]::new()
@@ -146,17 +172,8 @@ class FileAppender : ILoggerAppender {
 }
 
 # Export types and setup accelerators
-$exportTypes = [Logger], [ILoggerEntry], [ColoredConsoleAppender], [LoggingEventType], [ColoredConsoleAppender], [FileAppender]
-$accelerators = [PSObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')
-
-$exportTypes | ForEach-Object {
-  if (-not $accelerators::Get.ContainsKey($_.FullName)) {
-    $accelerators::Add($_.FullName, $_)
-  }
-}
-# Types that will be available to users when they import the module.
 $typestoExport = @(
-  [LogEntry], [FileAppender], [ILoggerEntry], [LogResource], [Logger]
+  [Logger], [ILoggerEntry], [LogEventType], [ConsoleAppender], [JsonAppender], [FileAppender]
 )
 $TypeAcceleratorsClass = [PsObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')
 foreach ($Type in $typestoExport) {
@@ -168,7 +185,6 @@ foreach ($Type in $typestoExport) {
     "TypeAcceleratorAlreadyExists $Message" | Write-Debug
   }
 }
-# Add type accelerators for every exportable type.
 foreach ($Type in $typestoExport) {
   $TypeAcceleratorsClass::Add($Type.FullName, $Type)
 }

@@ -1,11 +1,11 @@
 ﻿
 #!/usr/bin/env pwsh
 # .SYNOPSIS
-#   logger buildScript v0.1.0
+#   cliHelper.logger buildScript v0.1.0
 # .DESCRIPTION
-#   A custom build script for the module logger
+#   A custom build script for the module cliHelper.logger
 # .LINK
-#   https://github.com/79479952+chadnpc/logger/blob/main/build.ps1
+#   https://github.com/79479952+chadnpc/cliHelper.logger/blob/main/build.ps1
 # .EXAMPLE
 #   ./build.ps1 -Task Test
 #   This Will build the module, Import it and run tests using the ./Test-Module.ps1 script.

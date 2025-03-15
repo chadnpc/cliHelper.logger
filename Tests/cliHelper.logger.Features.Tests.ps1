@@ -1,5 +1,5 @@
 ﻿
-Describe "Feature tests: logger" {
+Describe "Feature tests: cliHelper.logger" {
   Context "Feature 1" {
     It "Does something expected" {
       # Write tests to verify the behavior of a specific feature.
