@@ -4,7 +4,6 @@ A PowerShell module that provides a thread-safe in-memory and file-based logging
 
 >The goal is to create an enterprise-grade logging module for PowerShell.
 
-[![Build Module](https://github.com/chadnpc/cliHelper.logger/actions/workflows/build_module.yaml/badge.svg)](https://github.com/chadnpc/cliHelper.logger/actions/workflows/build_module.yaml)
 [![Downloads](https://img.shields.io/powershellgallery/dt/cliHelper.logger.svg?style=flat&logo=powershell&color=blue)](https://www.powershellgallery.com/packages/cliHelper.logger)
 
 ## Usage
@@ -28,8 +27,8 @@ using namespace System.IO
 #Requires -Modules cliHelper.logger
 
 $logger = [Logger]::new()
-$logger.Append([ConsoleAppender]::new())
-$logger.Append([FileAppender]::new("mylog.log"))
+$logger.Appenders.Add([ConsoleAppender]::new())
+$logger.Appenders.Add([FileAppender]::new("mylog.log"))
 
 $logger.Information("System initialized")
 $logger.Error("Something went wrong", [Exception]::new("Test error"))
@@ -48,7 +47,7 @@ class VerboseEntry : ILoggerEntry {
 
 $customLogger = [Logger]::new()
 $customLogger.EntryType = [VerboseEntry]
-$customLogger.Append([ConsoleAppender]::new())
+$customLogger.Appenders.Add([ConsoleAppender]::new())
 $customLogger.Debug("Detailed debug information")
 ```
 
