@@ -1,4 +1,4 @@
-﻿## [![cliHelper.logger](https://github.com/user-attachments/assets/c93c4b80-34ea-45f8-a829-6060a9ba3996)](https://www.powershellgallery.com/packages/cliHelper.logger)
+﻿## [![cliHelper.logger](docs/images/logging.png)](https://www.powershellgallery.com/packages/cliHelper.logger)
 
 A PowerShell module that provides a thread-safe in-memory and file-based logging
 
