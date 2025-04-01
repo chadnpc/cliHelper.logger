@@ -13,6 +13,18 @@ enum LogEventType {
   Fatal
 }
 
+enum LoggingLevel {
+  # Ordered from least to most severe
+  Debug = 0     # Detailed diagnostic information
+  Info = 1      # General operational information
+  Notice = 2    # Normal but significant condition
+  Warning = 3   # Indicates a potential problem
+  Error = 4     # A recoverable error occurred
+  Critical = 5  # Critical conditions, e.g., application component unavailable
+  Alert = 6     # Action must be taken immediately
+  Emergency = 7 # System is unusable
+}
+
 class ILoggerAppender {
   [void] Log([ILoggerEntry]$entry) { }
 }
@@ -28,6 +40,9 @@ class ILoggerEntry {
 
 class LoggerEntry : ILoggerEntry {
   static [ILoggerEntry] Yield([string]$message) {
+    return [LoggerEntry]::Yield($message, $null)
+  }
+  static [ILoggerEntry] Yield([string]$message, [System.Exception]$exception) {
     $caller = (Get-PSCallStack)[2].Command
     $severity = [LogEventType]::$caller
     return [LoggerEntry]@{
@@ -39,13 +54,13 @@ class LoggerEntry : ILoggerEntry {
 }
 
 class BaseLogger : IDisposable {
-  [List[ILoggerAppender]]$Appenders = [List[ILoggerAppender]]::new()
-  [Type]$EntryType = [LoggerEntry]
-  [guid]$SessionId = [guid]::NewGuid()
   [string]$LogDirectory
   [StreamWriter]$StreamWriter
+  [Type]$EntryType = [LoggerEntry]
+  [guid]$SessionId = [guid]::NewGuid()
+  [List[ILoggerAppender]]$Appenders = [List[ILoggerAppender]]::new()
   static [Hashtable]$Sessions = [Hashtable]::Synchronized(@{})
-  static [string]$DefaultLogDirectory = "$pwd\Logs"
+  static [string]$DefaultLogDirectory # [PsModuleBase]::GetDataPath("cliHelper.logger", "Logs")
 
   BaseLogger() { }
 
@@ -55,7 +70,7 @@ class BaseLogger : IDisposable {
   }
 
   [void] Initialize() {
-    if (-not (Test-Path $this.LogDirectory)) {
+    if (!(Test-Path $this.LogDirectory)) {
       New-Item -Path $this.LogDirectory -ItemType Directory -Force | Out-Null
     }
 
@@ -96,14 +111,30 @@ class BaseLogger : IDisposable {
 }
 
 class Logger : BaseLogger {
+  hidden [LoggingLevel]$MinimumLevel = [LoggingLevel]::Info
+  hidden [string]$Prefix
   Logger() : base() { }
   Logger([string]$logDirectory) : base($logDirectory) { }
-
-  [void] Debug([string]$message) { $this.Log([LogEventType]::Debug, $message, $null) }
-  [void] Information([string]$message) { $this.Log([LogEventType]::Information, $message, $null) }
-  [void] Warning([string]$message) { $this.Log([LogEventType]::Warning, $message, $null) }
-  [void] Error([string]$message, [Exception]$ex) { $this.Log([LogEventType]::Error, $message, $ex) }
-  [void] Fatal([string]$message, [Exception]$ex) { $this.Log([LogEventType]::Fatal, $message, $ex) }
+  McpLogger() {
+    [void][Logger]::From("Info", "", [ref]$this)
+  }
+  McpLogger([LoggingLevel]$minLevel) {
+    [void][Logger]::From($minLevel, "", [ref]$this)
+  }
+  static hidden [Logger] From([LoggingLevel]$level, [string]$message, [ref]$o) {
+    $o.Value.MinimumLevel = $level
+    # TODO: add a more complete implementation
+    return $o.Value
+  }
+  [void] Log([LoggingLevel]$level, [string]$message) {
+    $this.Log($level, $message, $null)
+  }
+  [void] Log([LoggingLevel]$level, [string]$message, [Exception]$exception) {
+    $this.Log([LogEventType]::$level, $message, $exception)
+  }
+  [bool] IsEnabled([LoggingLevel]$level) {
+    return $level -ge $this.MinimumLevel
+  }
 }
 
 class ConsoleAppender : ILoggerAppender {
@@ -148,6 +179,44 @@ class JsonAppender : ILoggerAppender {
     }
   }
 }
+
+
+# Simple Logger Interface/Base
+class ConsoleLogger : Logger {
+  ConsoleLogger([LoggingLevel]$minLevel = [LoggingLevel]::Info, [string]$Prefix = "") {
+    $this.MinimumLevel = $minLevel
+    $this.Prefix = if ([string]::IsNullOrWhiteSpace($Prefix)) { "" } else { "[$Prefix] " }
+  }
+  [void] Log([LoggingLevel]$level, [string]$message) {
+    $this.Log($level, $message, $null)
+  }
+  [void] Log([LoggingLevel]$level, [string]$message, [Exception]$exception = $null) {
+    if ($level -ge $this.MinimumLevel) {
+      $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'
+      $logLine = "$($this.Prefix)$timestamp [$($level.ToString().ToUpper())] - $message"
+      switch ($true) {
+        ($level -ge [LoggingLevel]::Error) { Write-Error $logLine ; break }
+        ($level -eq [LoggingLevel]::Warning) { Write-Warning $logLine; break }
+        default { Write-Host $logLine }
+      }
+      if ($null -ne $exception) {
+        # Format exception details
+        Write-Error ($exception | Format-List * -Force | Out-String)
+      }
+    }
+  }
+  [bool] IsEnabled([LoggingLevel]$level) {
+    return $level -ge $this.MinimumLevel
+  }
+}
+
+class McpNullLogger : Logger {
+  hidden static [McpNullLogger] $_instance = [McpNullLogger]::new()
+  static [McpNullLogger] Instance() { return [McpNullLogger]::_instance }
+  Log([LoggingLevel]$level, [string]$message, [Exception]$exception = $null) { } # No-op
+  [bool] IsEnabled([LoggingLevel]$level) { return $false }
+}
+
 class FileAppender : ILoggerAppender {
   [StreamWriter]$Writer
   [ReaderWriterLockSlim]$Lock = [ReaderWriterLockSlim]::new()
@@ -159,8 +228,7 @@ class FileAppender : ILoggerAppender {
   [void] Log([ILoggerEntry]$entry) {
     $this.Lock.EnterWriteLock()
     try {
-      $this.Writer.WriteLine("[{0:u}] [{1}] {2}" -f
-        $entry.Timestamp, $entry.Severity, $entry.Message)
+      $this.Writer.WriteLine("[{0:u}] [{1}] {2}" -f $entry.Timestamp, $entry.Severity, $entry.Message)
     } finally {
       $this.Lock.ExitWriteLock()
     }
