@@ -28,15 +28,14 @@ This is the easiest way to get started in scripts or interactive sessions.
 # Import the module
 Import-Module cliHelper.logger
 
-# 1. Create a logger instance (defaults to Information level, Console and File appenders)
+# 1. Create a logger instance (defaults to Info level, Console and File appenders)
 #    Logs will go to .\Logs\default.log by default relative to the module path,
 #    or specify a custom directory.
-$logPath = Join-Path $env:TEMP "MyAppLogs" # Example: Use temp directory
-$logger = New-Logger -LogDirectory $logPath -MinimumLevel Debug # Log Debug and higher
+$logPath = Join-Path $env:TEMP "MyAppLogs"; $logger = New-Logger -LogDirectory $logPath -MinimumLevel Debug
 
 # It's critical to use try/finally to ensure Dispose() is called!
 try {
-  Write-LogEntry -Logger $logger -Severity Information -Message "Application started in directory: $logPath"
+  Write-LogEntry -Logger $logger -Severity Info -Message "Application started in directory: $logPath"
   Write-LogEntry -Logger $logger -Severity Debug -Message "Configuration loaded."
 
   # Simulate an operation
@@ -75,7 +74,7 @@ try {
   # Add a JSON appender to the same logger
   $jsonLogFile = Join-Path $logPath "events.json"
   Add-JsonAppender -Logger $logger -JsonFilePath $jsonLogFile
-  Write-LogEntry -Logger $logger -Severity Information -Message "Added JSON appender. Logs now go to Console, default.log, and events.json"
+  Write-LogEntry -Logger $logger -Severity Info -Message "Added JSON appender. Logs now go to Console, default.log, and events.json"
 
   $logger.Information("This message goes to all three appenders.") # Direct method call also works
 
