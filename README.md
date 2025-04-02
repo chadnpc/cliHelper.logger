@@ -161,7 +161,7 @@ class CustomEntry : ILoggerEntry {
   }
 }
 
-# Create a logger using the custom entry type
+# Create a logger with the custom entry type
 $customLogger = [Logger]::new()
 $customLogger.EntryType = [CustomEntry]
 $customLogger.Appenders.Add([ConsoleAppender]::new()) # Standard appender
