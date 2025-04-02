@@ -32,11 +32,11 @@ function Write-LogEntry {
   #>
   [CmdletBinding()]
   param(
-    [Parameter(Mandatory)]
-    [ValidateNotNull()] # Ensure a logger object is passed
+    [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+    [ValidateNotNull()]
     [Logger]$Logger,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory = $true)]
     [Alias('msg')]
     [string]$Message,
 
@@ -44,7 +44,7 @@ function Write-LogEntry {
     [Alias('l', 'level')]
     [LogEventType]$Severity = 1,
 
-    [Parameter()]
+    [Parameter(Mandatory = $false)]
     [Alias('e')][AllowNull()]
     [System.Exception]$Exception # Optional Exception parameter
   )
