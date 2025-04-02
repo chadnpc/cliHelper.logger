@@ -3,7 +3,7 @@ function New-Logger {
   .SYNOPSIS
     Creates a configured logger instance.
   .DESCRIPTION
-    Initializes a new logger instance using the cliHelper.logger module.
+    Initializes a new logger instance of the cliHelper.logger module.
     By default, it adds a ConsoleAppender for console output and a FileAppender
     writing to 'default.log' within the specified LogDirectory.
     Remember to call $logger.Dispose() when finished to release file handles.
