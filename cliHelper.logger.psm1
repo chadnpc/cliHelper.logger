@@ -13,15 +13,15 @@ enum LogEventType {
   Info = 1        # General operational information
   Warning = 2     # Indicates a potential problem
   Error = 3       # A recoverable error occurred
-  Fatal = 4       # Critical conditions, system may be unusable (Critical/Alert/Emergency mapped here)
+  Fatal = 4       # Critical conditions, system may be unusable (same as Critical/Alert/Emergency)
 }
 
 # marker classes for log entry data
 class ILoggerEntry {
-  [LogEventType]$Severity
   [string]$Message
+  [LogEventType]$Severity
   [Exception]$Exception
-  [datetime]$Timestamp # Set by the factory method
+  [datetime]$Timestamp = [datetime]::UtcNow
 }
 
 class ILoggerAppender {
@@ -30,11 +30,10 @@ class ILoggerAppender {
   }
 }
 
-#region Logger Core Classes
-
+# .EXAMPLE
+# [LoggerEntry]::new()
 class LoggerEntry : ILoggerEntry {
-  # Factory method to create a new entry
-  static [ILoggerEntry] NewEntry([LogEventType]$severity, [string]$message, [System.Exception]$exception) {
+  static [LoggerEntry] Create([LogEventType]$severity, [string]$message, [System.Exception]$exception) {
     return [LoggerEntry]@{
       Severity  = $severity
       Message   = $message
@@ -44,15 +43,14 @@ class LoggerEntry : ILoggerEntry {
   }
 }
 
-# Main Logger class - manages appenders and processes log entries
 class Logger : IDisposable {
-  [string] $LogDirectory
+  [IO.DirectoryInfo] $LogDirectory
   [List[ILoggerAppender]] $Appenders
   [LogEventType] $MinimumLevel = [LogEventType]::Info
   hidden [Type] $_entryType = [LoggerEntry]
   hidden [bool] $_IsDisposed = $false
   hidden [object] $_disposeLock = [object]::new()
-  static [string] $DefaultLogDirectory = [IO.Path]::Combine($PSScriptRoot, 'Logs')
+  static [IO.DirectoryInfo] $DefaultLogDirectory = [IO.Path]::Combine($PSScriptRoot, 'Logs')
   Logger() {
     [void][Logger]::From($null, [ref]$this)
   }
@@ -100,7 +98,7 @@ class Logger : IDisposable {
 
   [ILoggerEntry] CreateEntry([LogEventType]$severity, [string]$message, [Exception]$exception) {
     # Use the configured EntryType's static factory method
-    return $this.EntryType::NewEntry($severity, $message, $exception)
+    return $this.EntryType::Create($severity, $message, $exception)
   }
 
   [void] ProcessEntry([ILoggerEntry]$entry) {
@@ -149,15 +147,12 @@ class Logger : IDisposable {
     [void][System.GC]::SuppressFinalize($this)
   }
 }
-#endregion
-
-#region Appender Implementations
 
 # Appender that writes to the PowerShell console with colors
 class ConsoleAppender : ILoggerAppender {
   static [hashtable]$ColorMap = @{
     Debug   = [ConsoleColor]::DarkGray
-    Info    = [ConsoleColor]::Green # Use Green for Info for better visibility than default
+    Info    = [ConsoleColor]::Green
     Warning = [ConsoleColor]::Yellow
     Error   = [ConsoleColor]::Red
     Fatal   = [ConsoleColor]::Magenta
@@ -172,7 +167,7 @@ class ConsoleAppender : ILoggerAppender {
     # Write message
     Write-Host $message -ForegroundColor $color
 
-    # Write exception details if present, using Write-Error for visibility
+    # Write exception details if present, use Write-Error for visibility
     if ($null -ne $entry.Exception) {
       # Format exception concisely for console
       $exceptionMessage = "  Exception: $($entry.Exception.GetType().Name): $($entry.Exception.Message)"
@@ -333,9 +328,7 @@ class FileAppender : ILoggerAppender, IDisposable {
   }
 }
 
-#endregion
 
-#region Null Logger (for disabling logging easily)
 
 # A logger that does nothing. Useful as a default or for disabling logging.
 class NullLogger : Logger {
@@ -353,80 +346,51 @@ class NullLogger : Logger {
   [bool] IsEnabled([LogEventType]$level) { return $false }
 }
 
-#endregion
-
-#region Module Export Logic
-
 $typestoExport = @(
   [Logger], [ILoggerEntry], [LogEventType], [ConsoleAppender],
   [JsonAppender], [FileAppender], [NullLogger], [LoggerEntry]
 )
 # Register Type Accelerators
 $TypeAcceleratorsClass = [PsObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')
-$ExistingAccelerators = $TypeAcceleratorsClass::Get.Keys
-$SkippedAccelerators = [System.Collections.Generic.List[string]]::new()
-
 foreach ($Type in $typestoExport) {
-  $typeName = $Type.Name # Use short name for accelerator if possible/desired
-  # Or use FullName: $typeName = $Type.FullName
-  if ($ExistingAccelerators.Contains($typeName)) {
-    $SkippedAccelerators.Add($typeName)
-  } else {
-    try {
-      $TypeAcceleratorsClass::Add($typeName, $Type)
-    } catch {
-      Write-Debug "Failed to add type accelerator '$typeName': $_"
-      $SkippedAccelerators.Add($typeName)
-    }
+  if ($Type.FullName -in $TypeAcceleratorsClass::Get.Keys) {
+    $Message = @(
+      "Unable to register type accelerator '$($Type.FullName)'"
+      'Accelerator already exists.'
+    ) -join ' - '
+    "TypeAcceleratorAlreadyExists $Message" | Write-Debug
   }
 }
-
-if ($SkippedAccelerators.Count -gt 0) {
-  Write-Debug "Skipped adding existing or problematic type accelerators: $($SkippedAccelerators -join ', ')"
+# Add type accelerators for every exportable type.
+foreach ($Type in $typestoExport) {
+  $TypeAcceleratorsClass::Add($Type.FullName, $Type)
 }
-
-# Define cleanup script block for OnRemove
-$cleanupScript = {
-  param($typestoExport, $SkippedAccelerators)
-
-  $TypeAcceleratorsClass = [PsObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')
+# Remove type accelerators when the module is removed.
+$MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
   foreach ($Type in $typestoExport) {
-    $typeName = $Type.Name # Use the same name used for adding
-    # Or use FullName: $typeName = $Type.FullName
-    if (!($SkippedAccelerators.Contains($typeName))) {
-      # Only remove accelerators we successfully added
-      try {
-        if ($TypeAcceleratorsClass::Get.Keys.Contains($typeName)) {
-          $TypeAcceleratorsClass::Remove($typeName)
-        }
-      } catch {
-        Write-Warning "Failed to remove type accelerator '$typeName': $_"
-      }
-    }
+    $TypeAcceleratorsClass::Remove($Type.FullName)
   }
-}.GetNewClosure() # Close over the current scope variables
+}.GetNewClosure();
 
-# Assign to OnRemove, passing the necessary variables
-$MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = [ScriptBlock]::Create(". $cleanupScript -typestoExport $using:typestoExport -SkippedAccelerators $using:SkippedAccelerators")
-
-
-# Import functions from Public/Private directories
-$scripts = @()
+$scripts = @();
 $Public = Get-ChildItem "$PSScriptRoot/Public" -Filter "*.ps1" -Recurse -ErrorAction SilentlyContinue
-$Private = Get-ChildItem "$PSScriptRoot/Private" -Filter "*.ps1" -Recurse -ErrorAction SilentlyContinue
-$scripts += $Private # Import private first if they contain helpers
+$scripts += Get-ChildItem "$PSScriptRoot/Private" -Filter "*.ps1" -Recurse -ErrorAction SilentlyContinue
 $scripts += $Public
 
 foreach ($file in $scripts) {
   Try {
-    # Dot-source the script into the module's scope
-    . "$($file.FullName)"
+    if ([string]::IsNullOrWhiteSpace($file.fullname)) { continue }
+    . "$($file.fullname)"
   } Catch {
-    Write-Warning "Failed to source script '$($file.FullName)': $_"
+    Write-Warning "Failed to import function $($file.BaseName): $_"
+    $host.UI.WriteErrorLine($_)
   }
 }
 
-# Export public functions and the explicitly defined types
-Export-ModuleMember -Function $Public.BaseName -Class $typestoExport.Name
-
-#endregion
+$Param = @{
+  Function = $Public.BaseName
+  Cmdlet   = '*'
+  Alias    = '*'
+  Verbose  = $false
+}
+Export-ModuleMember @Param
