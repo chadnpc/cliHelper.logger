@@ -12,12 +12,6 @@ A PowerShell module for logging
 Install-Module cliHelper.logger
 ```
 
-Then import it into your session or script:
-
-```PowerShell
-Import-Module cliHelper.logger
-```
-
 ## Basic Usage
 
 This is the easiest way to get started in scripts or interactive sessions.
