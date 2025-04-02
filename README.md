@@ -1,8 +1,8 @@
 ﻿## [![cliHelper.logger](docs/images/logging.png)](https://www.PowerShellgallery.com/packages/cliHelper.logger)
 
-A PowerShell module that provides a thread-safe in-memory and file-based logging
+A PowerShell module for logging
 
->The goal is to create an enterprise-grade logging module for PowerShell.
+>The goal is to provide a simple, thread-safe, in-memory and file-based logging module for PowerShell.
 
 [![Downloads](https://img.shields.io/powershellgallery/dt/cliHelper.logger.svg?style=flat&logo=powershell&color=blue)](https://www.PowerShellgallery.com/packages/cliHelper.logger)
 
@@ -64,7 +64,7 @@ Write-Host "Check logs in $logPath"
 # Check the console output and the 'default.log' file in $logPath
 ```
 
-## Adding Appenders with Cmdlets
+### Usage with Cmdlets
 
 ```PowerShell
 $logPath = Join-Path $env:TEMP "MyAppLogs"
@@ -85,7 +85,7 @@ try {
 Write-Host "Check logs in $logPath (default.log and events.json)"
 ```
 
-## Advanced Usage (SDK-Style with Classes)
+### Usage with no cmdlets
 
 For more control or when building your own modules/tools, you can use the classes directly.
 
@@ -133,12 +133,12 @@ try {
 Write-Host "Check logs in $logDir (mytool.log and mytool_metrics.json)"
 ```
 
-### Custom Log Entry Type (Advanced)
+### Usage in your Custom classes (advanced). [you are on your own!]
 
 You can create custom classes implementing `ILoggerEntry` if you need to add more structured data to your logs (though custom appenders would be needed to fully utilize the extra data).
 
 ```PowerShell
-# Define your custom entry class
+# Define your custom class
 class CustomEntry : ILoggerEntry {
   [LogEventType]$Severity
   [string]$Message
@@ -175,9 +175,9 @@ try {
 }
 ```
 
-## NOTES:
+#### NOTES:
 
-1. **Logger Disposal**
+1. Remeber to **Dispose** the object
 
     **Always use a `try...finally` block:**
 
