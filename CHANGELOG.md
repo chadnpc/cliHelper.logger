@@ -1,6 +1,6 @@
 # changelog
 
-## [3/15/2025] v0.1.0 - Initial Release
+## [3/15/2025] v0.1.1 - Initial Release
 
 ### Core Components
 - [Logger] class with session management
@@ -11,7 +11,7 @@
 ### Appenders
 - [ConsoleAppender] for colored terminal output
 - [FileAppender] for persistent log storage
-- Custom appender interface (ILoggerAppender)
+- Custom appender interface (ILogAppender)
 
 ### Log Types
 - [LogEventType] enum with 5 severity levels

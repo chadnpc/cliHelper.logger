@@ -6,10 +6,7 @@
     Creates and adds an appender to the specified logger that writes log entries
     as JSON objects (one per line) to the target file path.
     The directory for the JSON file will be created if it doesn't exist.
-  .PARAMETER Logger
-    The logger instance (created via New-Logger or directly) to modify.
-  .PARAMETER JsonFilePath
-    The full path to the file where JSON log entries should be written.
+
   .EXAMPLE
     $logger = New-Logger
     Add-JsonAppender -Logger $logger -JsonFilePath "C:\MyApp\Logs\application_events.json"
@@ -25,10 +22,12 @@
   #>
   [CmdletBinding(SupportsShouldProcess = $false)]
   param(
+    # The logger instance (created via New-Logger or directly) to modify.
     [Parameter(Mandatory = $false, ValueFromPipeline = $true)]
     [ValidateNotNull()]
     [Logger]$Logger,
 
+    # The full path to the file where JSON log entries should be written.
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrWhiteSpace()][Alias('FilePath')]
     [string]$JsonFilePath
@@ -46,11 +45,12 @@
       $PSCmdlet.ThrowTerminatingError([System.Management.Automation.ErrorRecord]::new(
           $_.Exception, "FAILED_TO_ADD_JSONAPPENDER", [System.Management.Automation.ErrorCategory]::InvalidOperation,
           @{
-            Path = $resolvedPath
+            Path      = $resolvedPath
+            Timestamp = [datetime]::UtcNow
           }
         )
       )
-      # Clean up the partially created appender if it implements IDisposable and failed *after* creation but *before* adding?
+      # TODO: Clean up the partially created appender if it implements IDisposable and failed *after* creation but *before* adding?
       # In this case, the constructor throws, so $jsonAppender wouldn't be assigned on failure.
     }
   }

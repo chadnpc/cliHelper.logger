@@ -5,22 +5,12 @@ function New-Logger {
   .DESCRIPTION
     Initializes a new logger instance of the cliHelper.logger module.
     By default, it adds a ConsoleAppender for console output and a FileAppender
-    writing to 'default.log' within the specified LogDirectory.
+    writing to a .log file in the specified Logdirectory.
     Remember to call $logger.Dispose() when finished to release file handles.
-  .PARAMETER LogDirectory
-    Specifies the target directory for log files.
-  .PARAMETER FileName
-    The base name for the default log file created by the FileAppender. Defaults to 'default.log'.
-  .PARAMETER MinimumLevel
-    Sets the minimum severity level for messages to be processed by the logger.
-    Defaults to 'Information'. Valid values are from the LogEventType enum (Debug, Information, Warning, Error, Fatal).
-  .PARAMETER AddDefaultConsoleAppender
-    Switch to add the default ConsoleAppender. Defaults to $true.
-  .PARAMETER AddDefaultFileAppender
-    Switch to add the default FileAppender. Defaults to $true.
+
   .EXAMPLE
     # Create a logger writing to C:\MyApp\Logs, keeping default appenders
-    $logger = New-Logger -LogDirectory "C:\MyApp\Logs"
+    $logger = New-Logger -Logdirectory "C:\MyApp\Logs"
     # Log messages...
     $logger.Dispose()
   .EXAMPLE
@@ -52,39 +42,41 @@ function New-Logger {
   #>
   [CmdletBinding(SupportsShouldProcess = $false)][OutputType([Logger])][Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
   param(
+    # The target directory for log files.
     [Parameter(Mandatory = $false, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
-    [Alias('Path', 'LogDir')]
-    [string]$LogDirectory,
+    [Alias('Path', 'Logdir')]
+    [string]$Logdirectory = [IO.Path]::GetTempPath(),
 
+    # The base name for the default log file created by the FileAppender.
     [Parameter(Mandatory = $false)]
     [Alias('fname')]
-    [string]$FileName = 'default.log',
+    [string]$FileName = "log_$(Get-Date -Format 'yyyyMMdd-HHmmss')-$(New-Guid).log",
 
+    # Sets the minimum severity level for messages to be processed by the logger.
+    # Defaults to 'Info'. Valid values are from the LogEventType enum (Debug, Information, Warning, Error, Fatal).
     [Parameter(Mandatory = $false)]
     [Alias('Level')]
     [LogEventType]$MinimumLevel = [LogEventType]::Info,
-    [switch]$AddDefaultConsoleAppender
+
+    # has Console appender by default
+    [ILogAppender[]]$Appenders = @([ConsoleAppender]::new())
   )
   begin {
     $ob = $null
   }
   Process {
     try {
-      # Create logger instance. The constructor will handle LogDirectory creation.
-      $ob = [Logger]::new($LogDirectory)
+      # Create logger instance. The constructor will handle Logdirectory creation.
+      $ob = [Logger]::new($Logdirectory)
       $ob.MinimumLevel = $MinimumLevel
-
-      # Add default console appender if requested
-      if ($AddDefaultConsoleAppender) {
-        $consoleAppender = [ConsoleAppender]::new()
-        $ob.Appenders += $consoleAppender
-        Write-Debug "[Logger] Added ConsoleAppender to logger."
+      if ($Appenders.count -gt 0) {
+        $Appenders.ForEach({ $ob.Appenders += $_ })
       }
-      $logFilePath = [IO.Path]::Combine($LogDirectory, $FileName)
+      $logFilePath = [IO.Path]::Combine($Logdirectory, $FileName)
       if (![IO.File]::Exists($logFilePath)) { New-Item -Path $logFilePath -ItemType File -Force | Out-Null }
       $ob.Appenders += [FileAppender]::new($logFilePath)
       Write-Debug "[Logger] Added FileAppender for path '$logFilePath'."
-      Write-Debug "[Logger] created with MinimumLevel '$MinimumLevel' and LogDirectory '$($ob.LogDirectory)'."
+      Write-Debug "[Logger] created with MinimumLevel '$MinimumLevel' and Logdirectory '$($ob.Logdirectory)'."
     } catch {
       $PSCmdlet.ThrowTerminatingError([System.Management.Automation.ErrorRecord]::new(
           $_.Exception, "FAILED_TO_CREATE_LOGGER", [System.Management.Automation.ErrorCategory]::InvalidOperation,

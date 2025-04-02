@@ -14,18 +14,15 @@ Install-Module cliHelper.logger
 
 ## Basic Usage
 
-This is the easiest way to get started in scripts or interactive sessions.
-
-(+) Read docs for more info on [core concepts](docs/Readme.md) used.
+This is the easiest way to get started with scripts or interactive sessions.
 
 ```PowerShell
 # Import the module
 Import-Module cliHelper.logger
 
 # 1. Create a logger instance (defaults to Info level, Console and File appenders)
-#    Logs will go to .\Logs\default.log by default relative to the module path,
-#    or specify a custom directory.
-$logPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs"); $logger = New-Logger -LogDir $logPath -Level Debug
+#    Logs will go to .$env:TEMP by default. or specify a custom directory.
+$logPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs"); $logger = New-Logger -Logdir $logPath -Level Debug
 
 # It's critical to use try/finally to ensure Dispose() is called!
 try {
@@ -52,24 +49,23 @@ try {
     $logger.Dispose()
   }
 }
-# Check the console output and the 'default.log' file in $logPath
 ```
 
 ### Usage with Cmdlets
 
 ```PowerShell
-$logPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs"); $logger = New-Logger -LogDir $logPath
+$logPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs"); $logger = New-Logger -Logdir $logPath
 
 try {
   # Add a JSON appender to the same logger
   $logger | Add-JsonAppender -FilePath ([IO.Path]::Combine($logPath, "events.json"))
-  $logger | Write-LogEntry -Severity Info -Message "Added JSON appender. Logs now go to Console, default.log, and events.json"
-  $logger.Info("This message goes to all three appenders.") # Direct method call also works
+  $logger | Write-LogEntry -Severity Info -Message "Added JSON appender. Logs now go to Console, env:TMP/*filename.log, and events.json"
+  $logger.Info("This message goes to all appenders.") # Direct method call also works
 } finally {
   $logger.Dispose()
 }
 
-Write-Host "Check logs in $logPath (default.log and events.json)"
+Write-Host "Check logs in $logPath (*filename.log and *filename.json)"
 ```
 
 ### Usage with no cmdlets
@@ -81,18 +77,18 @@ For more control or when building your own modules/tools, you can use the classe
 Import-Module cliHelper.logger
 
 # Define log directory
-$logDir = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs")
+$Logdir = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs")
 
 # 1. Create logger instance directly
-$ObjectLogger = [Logger]::new($logDir) # Constructor ensures directory exists
+$ObjectLogger = [Logger]::new($Logdir) # Constructor ensures directory exists
 
 # Set minimum level
 $ObjectLogger.MinimumLevel = [LogEventType]::Debug
 
 # 2. Create and add appenders manually
 $console = [ConsoleAppender]::new()
-$file = [FileAppender]::new((Join-Path $logDir "mytool.log"))
-$json = [JsonAppender]::new((Join-Path $logDir "mytool_metrics.json"))
+$file = [FileAppender]::new((Join-Path $Logdir "mytool.log"))
+$json = [JsonAppender]::new((Join-Path $Logdir "mytool_metrics.json"))
 
 $ObjectLogger.Appenders += $console
 $ObjectLogger.Appenders += $file
@@ -117,7 +113,7 @@ try {
   }
 }
 
-Write-Host "Check logs in $logDir (mytool.log and mytool_metrics.json)"
+Write-Host "Check logs in $Logdir (mytool.log and mytool_metrics.json)"
 ```
 
 ### Usage in your Custom classes (advanced). [you are on your own!]
@@ -130,18 +126,17 @@ class CustomEntry : ILoggerEntry {
   [LogEventType]$Severity
   [string]$Message
   [Exception]$Exception
-  [datetime]$Timestamp
+  [datetime]$Timestamp = [datetime]::UtcNow
   [string]$CorrelationId # Custom field
 
   # Factory method (required pattern)
-  static [ILoggerEntry] NewEntry([LogEventType]$severity, [string]$message, [System.Exception]$exception) {
+  static [ILoggerEntry] Create([LogEventType]$severity, [string]$message, [System.Exception]$exception) {
     # You might generate or retrieve CorrelationId here
     $id = (Get-Random -Maximum 10000).ToString("D5")
     return [CustomEntry]@{
       Severity      = $severity
       Message       = $message
       Exception     = $exception
-      Timestamp     = [datetime]::UtcNow
       CorrelationId = $id
     }
   }
@@ -150,17 +145,17 @@ class CustomEntry : ILoggerEntry {
 # Create a logger with the custom entry type
 $customLogger = [Logger]::new()
 $customLogger.EntryType = [CustomEntry]
-$customLogger.Appenders += [ConsoleAppender]::new() # Standard appender
+$customLogger.Appenders += [ConsoleAppender]::new() # ie: log will passthru the console by default.
 
 try {
-  # When logging, the custom NewEntry factory method is called
+  # When logging, the custom Create factory method is called
   $customLogger.Info("Logging event with custom entry type.")
-  # Note: Standard appenders won't display CorrelationId by default
-  # You would need a custom appender to format/use it.
 } finally {
   $customLogger.Dispose()
 }
 ```
+
+Read the docs for more information on the [concepts](docs/Readme.md) used.
 
 #### NOTES:
 
@@ -174,9 +169,10 @@ try {
     try {
       # ... Your code that uses the logger ...
       $logger.Info("Doing work...")
+      throw [Exception]::new('Simulated exception')
     } catch {
       # Optional: Log exceptions from your main code block
-      $logger.Error("An error occurred in the main block.", $_)
+      $logger.Error("An error occurred in the main block.", $_.Exception)
       # Re-throw if needed: throw
     } finally {
       # This block ALWAYS executes, even if errors occur

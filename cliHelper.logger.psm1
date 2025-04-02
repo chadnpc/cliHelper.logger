@@ -25,7 +25,7 @@ class ILoggerEntry {
   [datetime]$Timestamp = [datetime]::UtcNow
 }
 
-class ILoggerAppender {
+class ILogAppender {
   [void] Log([ILoggerEntry]$entry) {
     Write-Warning "Log method not implemented in $($this.GetType().Name)"
   }
@@ -46,8 +46,8 @@ class LoggerEntry : ILoggerEntry {
 
 class Logger : PsModuleBase, IDisposable {
   [LogEventType] $MinimumLevel = [LogEventType]::Info
-  [ValidateNotNull()][IO.DirectoryInfo] $LogDirectory
-  [ValidateNotNull()][ILoggerAppender[]] $Appenders = @()
+  [ValidateNotNull()][IO.DirectoryInfo] $Logdirectory
+  hidden [ValidateNotNull()][ILogAppender[]] $Appenders = @()
   hidden [Type] $_entryType = [LoggerEntry]
   hidden [object] $_disposeLock = [object]::new()
   Logger() {
@@ -56,22 +56,22 @@ class Logger : PsModuleBase, IDisposable {
       [ref]$this
     )
   }
-  Logger([string]$LogDirectory) {
-    [void][Logger]::From($LogDirectory, [ref]$this)
+  Logger([string]$Logdirectory) {
+    [void][Logger]::From($Logdirectory, [ref]$this)
   }
-  static hidden [Logger] From([string]$LogDirectory, [ref]$o) {
-    if (![IO.Directory]::Exists($LogDirectory)) {
+  static hidden [Logger] From([string]$Logdirectory, [ref]$o) {
+    if (![IO.Directory]::Exists($Logdirectory)) {
       try {
-        PsModuleBase\New-Directory $LogDirectory
-        $o.Value.LogDirectory = [IO.DirectoryInfo]::new($LogDirectory)
+        PsModuleBase\New-Directory $Logdirectory
+        $o.Value.Logdirectory = [IO.DirectoryInfo]::new($Logdirectory)
       } catch {
-        Write-Error "Failed to create log directory '$($o.Value.LogDirectory)':`n$_"
+        Write-Error "Failed to create log directory '$($o.Value.Logdirectory)':`n$_"
         # Decide if this should be fatal or just prevent file logging later
       }
     }
     $o.Value.PsObject.Properties.Add([PsScriptProperty]::new('EntryType', { return $this._entryType }, {
           param($value)
-          if ($value -is [Type] -and $value.GetInterfaces().Name -contains 'ILoggerEntry') {
+          if ($value -is [Type] -and $value.BaseType.Name -eq 'ILoggerEntry') {
             $this._entryType = $value
           } else {
             throw [SetValueException]::new("EntryType must be a Type that implements ILoggerEntry")
@@ -123,6 +123,17 @@ class Logger : PsModuleBase, IDisposable {
   [void] Fatal([string]$message) { $this.Fatal($message, $null) }
   [void] Fatal([string]$message, [Exception]$exception = $null) { $this.Log([LogEventType]::Fatal, $message, $exception) }
 
+  [string] ToString() {
+    return @{
+      EntryType    = $this.EntryType
+      MinimumLevel = $this.MinimumLevel
+      Logdirectory = $this.Logdirectory
+      Appenders    = $this.Appenders ? ([IO.FileInfo[]]($this.Appenders.FilePath)).Name :@()
+    } | ConvertTo-Json
+  }
+  [void] ClearLogdirectory() {
+    $this.Logdirectory.EnumerateFiles().ForEach({ Remove-Item $_.FullName -Force })
+  }
   [void] Dispose() {
     if ($this.IsDisposed) { return }
     # Dispose appenders that implement IDisposable
@@ -137,13 +148,13 @@ class Logger : PsModuleBase, IDisposable {
     }
     # Clear the list to prevent further use and release references
     $this.Appenders.Clear()
-    $this.PsObject.Properties.Add([psscriptproperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("IsDisposed is read-only") }))
+    $this.PsObject.Properties.Add([psscriptproperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a read-only Property") }))
     [void][System.GC]::SuppressFinalize($this)
   }
 }
 
 # Appender that writes to the PowerShell console with colors
-class ConsoleAppender : ILoggerAppender {
+class ConsoleAppender : ILogAppender {
   static [hashtable]$ColorMap = @{
     Debug   = [ConsoleColor]::DarkGray
     Info    = [ConsoleColor]::Green
@@ -174,7 +185,7 @@ class ConsoleAppender : ILoggerAppender {
 }
 
 # Appender that writes log entries as JSON objects to a file
-class JsonAppender : ILoggerAppender, IDisposable {
+class JsonAppender : ILogAppender, IDisposable {
   [ValidateNotNullOrWhiteSpace()][string]$FilePath
   hidden [ValidateNotNull()][StreamWriter]$_writer
   hidden [ValidateNotNull()][object]$_lock = [object]::new()
@@ -222,7 +233,6 @@ class JsonAppender : ILoggerAppender, IDisposable {
       throw [System.Exception]::new("JsonAppender failed to write to '$($this.FilePath)'", $_.Exception)
     }
   }
-
   [void] Dispose() {
     if ($this.IsDisposed) { return }
     if ($null -ne $this._writer) {
@@ -232,14 +242,13 @@ class JsonAppender : ILoggerAppender, IDisposable {
       } catch {
         Write-Error "JsonAppender error during dispose for file '$($this.FilePath)': $_"
       }
-      $this._writer = $null
     }
-    $this.PsObject.Properties.Add([psscriptproperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("IsDisposed is read-only") }))
+    $this.PsObject.Properties.Add([psscriptproperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a read-only Property") }))
   }
 }
 
 # Appender that writes formatted text logs to a file
-class FileAppender : ILoggerAppender, IDisposable {
+class FileAppender : ILogAppender, IDisposable {
   [string]$FilePath
   hidden [StreamWriter]$_writer
   hidden [ReaderWriterLockSlim]$_lock = [ReaderWriterLockSlim]::new()
@@ -277,7 +286,7 @@ class FileAppender : ILoggerAppender, IDisposable {
       $logLine += "`n$($exceptionText)"
     }
     # Acquire write lock
-    # $this._lock.EnterWriteLock()
+    $this._lock.EnterWriteLock()
     try {
       # Re-check disposal after acquiring lock
       if ($this.IsDisposed -or $null -eq $this._writer) { return }
@@ -292,7 +301,7 @@ class FileAppender : ILoggerAppender, IDisposable {
 
   [void] Dispose() {
     # Prevent new logs trying to acquire lock while disposing
-    # $this._lock.EnterWriteLock() # Acquire lock to ensure no writes are happening
+    $this._lock.EnterWriteLock() # Acquire lock to ensure no writes are happening
     try {
       if ($null -ne $this._writer) {
         try {
@@ -305,12 +314,10 @@ class FileAppender : ILoggerAppender, IDisposable {
     } finally {
       $this._lock.ExitWriteLock()
     }
-    $this.PsObject.Properties.Add([psscriptproperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("IsDisposed is read-only") }))
-    # $this._lock.Dispose()
+    $this.PsObject.Properties.Add([psscriptproperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a read-only Property") }))
+    $this._lock.Dispose()
   }
 }
-
-
 
 # A logger that does nothing. Useful as a default or for disabling logging.
 class NullLogger : Logger {
@@ -328,7 +335,7 @@ class NullLogger : Logger {
 }
 
 $typestoExport = @(
-  [Logger], [ILoggerEntry], [ILoggerAppender], [LogEventType], [ConsoleAppender],
+  [Logger], [ILoggerEntry], [ILogAppender], [LogEventType], [ConsoleAppender],
   [JsonAppender], [FileAppender], [NullLogger], [LoggerEntry]
 )
 # Register Type Accelerators

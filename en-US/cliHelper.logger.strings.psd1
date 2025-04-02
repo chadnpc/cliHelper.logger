@@ -1,8 +1,8 @@
 ﻿@{
   ModuleName    = 'cliHelper.logger'
-  ModuleVersion = '0.1.0'
+  ModuleVersion = '0.1.1'
   ReleaseNotes  = @'
-# cliHelper.logger v0.1.0 Release Notes
+# cliHelper.logger v0.1.1 Release Notes
 
 ## Initial Release Features
 
@@ -15,7 +15,7 @@
 ### Appenders
 - [ConsoleAppender] for colored terminal output
 - [FileAppender] for persistent log storage
-- Custom appender interface (ILoggerAppender)
+- Custom appender interface (ILogAppender)
 
 ### Log Types
 - [LogEventType] enum with 5 severity levels

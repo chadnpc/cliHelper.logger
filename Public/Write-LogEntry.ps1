@@ -50,28 +50,24 @@ function Write-LogEntry {
   )
 
   Process {
-    # Check if the logger is disposed - prevents errors after disposal
-    # Accessing a potentially private field is not ideal, but demonstrates the check.
-    # A public IsDisposed property on Logger would be better.
-    # For now, rely on the logger's internal checks or catch potential NullReferenceExceptions if methods fail.
-
+    #HACK: For now, rely on the logger's internal checks or catch potential NullReferenceExceptions if methods fail.
     try {
-      # Logger methods now handle the IsEnabled check internally
       switch ($Severity) {
-        "Debug" { $Logger.Debug($Message) }
-        "Info" { $Logger.Info($Message) }
-        "Warning" { $Logger.Warning($Message) }
-        "Error" { $Logger.Error($Message, $Exception) }
-        "Fatal" { $Logger.Fatal($Message, $Exception) }
+        "Debug" { $Logger.Debug($Message); break }
+        "Info" { $Logger.Info($Message); break }
+        "Warning" { $Logger.Warning($Message); break }
+        "Error" { $Logger.Error($Message, $Exception); break }
+        "Fatal" { $Logger.Fatal($Message, $Exception); break }
         Default {
-          throw "Unhandled LogEventType: $Severity"
+          throw [System.Exception]::new("Unhandled LogEventType: $Severity")
         }
       }
     } catch {
       $PSCmdlet.ThrowTerminatingError([System.Management.Automation.ErrorRecord]::new(
           $_.Exception, "FAILED_TO_WRITE_LOG_ENTRY", [System.Management.Automation.ErrorCategory]::InvalidOperation,
           @{
-            Hint = "Ensure the logger is not disposed"
+            Hint      = "Ensure the logger is not disposed"
+            Timestamp = [datetime]::UtcNow
           }
         )
       )

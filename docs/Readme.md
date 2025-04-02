@@ -3,7 +3,7 @@
 ## Core Concepts
 
 *   **Logger (`[Logger]`)**: The main object you interact with. It holds configuration (like `MinimumLevel`) and a list of appenders. **Crucially, it should be disposed of when done (`$logger.Dispose()`)**.
-*   **Appenders (`[ILoggerAppender]`)**: Define *where* log messages go. This module includes:
+*   **Appenders (`[ILogAppender]`)**: Define *where* log messages go. This module includes:
     *   `[ConsoleAppender]`: Writes colored output to the PowerShell host.
     *   `[FileAppender]`: Writes formatted text to a specified file.
     *   `[JsonAppender]`: Writes JSON objects (one per line) to a specified file.
