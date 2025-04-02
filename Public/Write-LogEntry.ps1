@@ -58,17 +58,23 @@ function Write-LogEntry {
     try {
       # Logger methods now handle the IsEnabled check internally
       switch ($Severity) {
-        Debug { $Logger.Debug($Message) }
-        Info { $Logger.Information($Message) }
-        Warning { $Logger.Warning($Message) }
-        Error { $Logger.Error($Message, $Exception) }
-        Fatal { $Logger.Fatal($Message, $Exception) }
-        Default { Write-Warning "Unhandled LogEventType: $Severity" } # Safety net
+        "Debug" { $Logger.Debug($Message) }
+        "Info" { $Logger.Info($Message) }
+        "Warning" { $Logger.Warning($Message) }
+        "Error" { $Logger.Error($Message, $Exception) }
+        "Fatal" { $Logger.Fatal($Message, $Exception) }
+        Default {
+          throw "Unhandled LogEventType: $Severity"
+        }
       }
     } catch {
-      # Catch errors that might occur if logger is used improperly (e.g., after disposal)
-      # or if an appender throws an unexpected error not caught internally.
-      Write-Error "Failed to write log entry: $_. Ensure the logger is not disposed."
+      $PSCmdlet.ThrowTerminatingError([System.Management.Automation.ErrorRecord]::new(
+          $_.Exception, "FAILED_TO_WRITE_LOG_ENTRY", [System.Management.Automation.ErrorCategory]::InvalidOperation,
+          @{
+            Hint = "Ensure the logger is not disposed"
+          }
+        )
+      )
     }
   }
 }
