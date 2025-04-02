@@ -4,20 +4,19 @@ using namespace System.IO
 using namespace System.Text
 using namespace System.Threading
 using namespace System.Collections.Generic
-using namespace System.Collections.Concurrent # Added for potential future async
+using namespace System.Management.Automation
+using namespace System.Collections.Concurrent
 
-#region Enums and Interfaces
-
+# Enums
 enum LogEventType {
-  # Ordered from least to most severe
-  Debug = 0       # Detailed diagnostic information
-  Information = 1 # General operational information (Info)
+  Debug = 0       # Detailed diagnostic Info
+  Info = 1        # General operational information
   Warning = 2     # Indicates a potential problem
   Error = 3       # A recoverable error occurred
   Fatal = 4       # Critical conditions, system may be unusable (Critical/Alert/Emergency mapped here)
 }
 
-# Interface for log entry data
+# marker classes for log entry data
 class ILoggerEntry {
   [LogEventType]$Severity
   [string]$Message
@@ -25,17 +24,14 @@ class ILoggerEntry {
   [datetime]$Timestamp # Set by the factory method
 }
 
-# Interface for log appenders (consumers)
 class ILoggerAppender {
-  # Method to be implemented by appenders to process a log entry
-  [void] Log([ILoggerEntry]$entry) { Write-Warning "Log method not implemented in $($this.GetType().Name)" }
+  [void] Log([ILoggerEntry]$entry) {
+    Write-Warning "Log method not implemented in $($this.GetType().Name)"
+  }
 }
-
-#endregion
 
 #region Logger Core Classes
 
-# Default implementation of a log entry
 class LoggerEntry : ILoggerEntry {
   # Factory method to create a new entry
   static [ILoggerEntry] NewEntry([LogEventType]$severity, [string]$message, [System.Exception]$exception) {
@@ -50,60 +46,54 @@ class LoggerEntry : ILoggerEntry {
 
 # Main Logger class - manages appenders and processes log entries
 class Logger : IDisposable {
-  hidden [LogEventType]$_minimumLevel = [LogEventType]::Information
-  hidden [Type]$_entryType = [LoggerEntry]
-  hidden [bool]$_isDisposed = $false
-  hidden [object]$_disposeLock = [object]::new()
-
-  # Public properties
-  [string]$LogDirectory # Optional: Primarily for reference or default file appender location
-  [List[ILoggerAppender]]$Appenders
-  # [Type]$EntryType {
-  #   get { return $this._entryType }
-  #   Set-Variable {
-  #     if ($value -is [Type] -and $value.GetInterfaces().Name -contains 'ILoggerEntry') {
-  #       $this._entryType = $value
-  #     } else {
-  #       throw "EntryType must be a Type that implements ILoggerEntry"
-  #     }
-  #   }
-  # }
-  # [LogEventType]$MinimumLevel {
-  #   get { return $this._minimumLevel }
-  #   Set-Variable { $this._minimumLevel = $value }
-  # }
-
-  # Static default directory (initialized below class definition)
-  static [string]$DefaultLogDirectory
-
-  # Constructors
-  Logger([string]$logDirectory = $null) {
-    $this.Appenders = [List[ILoggerAppender]]::new()
+  [string] $LogDirectory
+  [List[ILoggerAppender]] $Appenders
+  [LogEventType] $MinimumLevel = [LogEventType]::Info
+  hidden [Type] $_entryType = [LoggerEntry]
+  hidden [bool] $_IsDisposed = $false
+  hidden [object] $_disposeLock = [object]::new()
+  static [string] $DefaultLogDirectory = [IO.Path]::Combine($PSScriptRoot, 'Logs')
+  Logger() {
+    [void][Logger]::From($null, [ref]$this)
+  }
+  Logger([string]$LogDirectory) {
+    [void][Logger]::From($LogDirectory, [ref]$this)
+  }
+  static [Logger] From([string]$LogDirectory, [ref]$o) {
+    $o.Value.Appenders = [List[ILoggerAppender]]::new()
     # Use provided directory or the static default if null/empty
-    $this.LogDirectory = if ([string]::IsNullOrWhiteSpace($logDirectory)) { [Logger]::DefaultLogDirectory } else { $logDirectory }
-
+    $o.Value.LogDirectory = [string]::IsNullOrWhiteSpace($LogDirectory) ? ([Logger]::DefaultLogDirectory) : $LogDirectory
     # Ensure the target directory exists if specified and non-null
-    if (![string]::IsNullOrWhiteSpace($this.LogDirectory)) {
-      if (!(Test-Path $this.LogDirectory)) {
+    if (![string]::IsNullOrWhiteSpace($o.Value.LogDirectory)) {
+      if (!(Test-Path $o.Value.LogDirectory)) {
         try {
-          New-Item -Path $this.LogDirectory -ItemType Directory -Force -ErrorAction Stop | Out-Null
+          New-Item -Path $o.Value.LogDirectory -ItemType Directory -Force -ErrorAction Stop | Out-Null
         } catch {
-          Write-Error "Failed to create log directory '$($this.LogDirectory)': $_"
+          Write-Error "Failed to create log directory '$($o.Value.LogDirectory)': $_"
           # Decide if this should be fatal or just prevent file logging later
         }
       }
     }
+    $o.Value.PsObject.Properties.Add([PsScriptProperty]::new('EntryType', { return $this._entryType }, {
+          param($value)
+          if ($value -is [Type] -and $value.GetInterfaces().Name -contains 'ILoggerEntry') {
+            $this._entryType = $value
+          } else {
+            throw [SetValueException]::new("EntryType must be a Type that implements ILoggerEntry")
+          }
+        }
+      )
+    )
+    return $o.Value
   }
-
   [bool] IsEnabled([LogEventType]$level) {
-    return (!$this._isDisposed) -and ($level -ge $this.MinimumLevel)
+    return (!$this._IsDisposed) -and ($level -ge $this.MinimumLevel)
   }
 
   [void] Log([LogEventType]$severity, [string]$message, [Exception]$exception = $null) {
     if (!$this.IsEnabled($severity)) {
       return
     }
-
     $entry = $this.CreateEntry($severity, $message, $exception)
     $this.ProcessEntry($entry)
   }
@@ -127,15 +117,20 @@ class Logger : IDisposable {
   }
 
   # --- Convenience Methods ---
+  [void] Info([string]$message) { $this.Log([LogEventType]::Info, $message) }
   [void] Debug([string]$message) { $this.Log([LogEventType]::Debug, $message) }
-  [void] Information([string]$message) { $this.Log([LogEventType]::Information, $message) }
+
   [void] Warning([string]$message) { $this.Log([LogEventType]::Warning, $message) }
-  [void] Error([string]$message, [Exception]$exception = $null) { $this.Log([LogEventType]::Error, $message, $exception) }
+
+  [void] Error([string]$message) { $this.Error($message, $null) }
+  [void] Error([string]$message, [Exception]$exception) { $this.Log([LogEventType]::Error, $message, $exception) }
+
+  [void] Fatal([string]$message) { $this.Fatal($message, $null) }
   [void] Fatal([string]$message, [Exception]$exception = $null) { $this.Log([LogEventType]::Fatal, $message, $exception) }
 
   [void] Dispose() {
     lock ($this._disposeLock) {
-      if ($this._isDisposed) { return }
+      if ($this._IsDisposed) { return }
 
       # Dispose appenders that implement IDisposable
       foreach ($appender in $this.Appenders) {
@@ -149,17 +144,11 @@ class Logger : IDisposable {
       }
       # Clear the list to prevent further use and release references
       $this.Appenders.Clear()
-
-      $this._isDisposed = $true
+      $this._IsDisposed = $true
     }
-    # Suppress finalization if this class had a finalizer (it doesn't)
-    # [System.GC]::SuppressFinalize($this)
+    [void][System.GC]::SuppressFinalize($this)
   }
 }
-
-# Initialize static property after class definition
-[Logger]::DefaultLogDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Logs'
-
 #endregion
 
 #region Appender Implementations
@@ -167,11 +156,11 @@ class Logger : IDisposable {
 # Appender that writes to the PowerShell console with colors
 class ConsoleAppender : ILoggerAppender {
   static [hashtable]$ColorMap = @{
-    Debug       = [ConsoleColor]::DarkGray
-    Information = [ConsoleColor]::Green # Use Green for Info for better visibility than default
-    Warning     = [ConsoleColor]::Yellow
-    Error       = [ConsoleColor]::Red
-    Fatal       = [ConsoleColor]::Magenta
+    Debug   = [ConsoleColor]::DarkGray
+    Info    = [ConsoleColor]::Green # Use Green for Info for better visibility than default
+    Warning = [ConsoleColor]::Yellow
+    Error   = [ConsoleColor]::Red
+    Fatal   = [ConsoleColor]::Magenta
   }
 
   [void] Log([ILoggerEntry]$entry) {
@@ -200,7 +189,7 @@ class JsonAppender : ILoggerAppender, IDisposable {
   [string]$FilePath
   hidden [StreamWriter]$_writer
   hidden [object]$_lock = [object]::new()
-  hidden [bool]$_isDisposed = $false
+  hidden [bool]$_IsDisposed = $false
 
   JsonAppender([string]$Path) {
     $this.FilePath = Convert-Path $Path # Resolve path
@@ -223,7 +212,7 @@ class JsonAppender : ILoggerAppender, IDisposable {
   }
 
   [void] Log([ILoggerEntry]$entry) {
-    if ($this._isDisposed) { return }
+    if ($this._IsDisposed) { return }
 
     # Create the object to serialize
     $logObject = [ordered]@{
@@ -240,7 +229,7 @@ class JsonAppender : ILoggerAppender, IDisposable {
     # Lock and write
     lock ($this._lock) {
       # Re-check disposal after acquiring lock
-      if ($this._isDisposed -or $null -eq $this._writer) { return }
+      if ($this._IsDisposed -or $null -eq $this._writer) { return }
       try {
         $this._writer.WriteLine($jsonLine)
         # AutoFlush is true, manual flush shouldn't be needed unless guaranteeing write before potential crash
@@ -253,7 +242,7 @@ class JsonAppender : ILoggerAppender, IDisposable {
 
   [void] Dispose() {
     lock ($this._lock) {
-      if ($this._isDisposed) { return }
+      if ($this._IsDisposed) { return }
       if ($null -ne $this._writer) {
         try {
           $this._writer.Flush() # Final flush
@@ -263,7 +252,7 @@ class JsonAppender : ILoggerAppender, IDisposable {
         }
         $this._writer = $null
       }
-      $this._isDisposed = $true
+      $this._IsDisposed = $true
     }
   }
 }
@@ -273,7 +262,7 @@ class FileAppender : ILoggerAppender, IDisposable {
   [string]$FilePath
   hidden [StreamWriter]$_writer
   hidden [ReaderWriterLockSlim]$_lock = [ReaderWriterLockSlim]::new()
-  hidden [bool]$_isDisposed = $false
+  hidden [bool]$_IsDisposed = $false
 
   FileAppender([string]$Path) {
     $this.FilePath = Convert-Path $Path # Resolve path
@@ -296,7 +285,7 @@ class FileAppender : ILoggerAppender, IDisposable {
   }
 
   [void] Log([ILoggerEntry]$entry) {
-    if ($this._isDisposed) { return }
+    if ($this._IsDisposed) { return }
 
     # Format the log line
     $logLine = "[{0:u}] [{1,-11}] {2}" -f $entry.Timestamp, $entry.Severity.ToString().ToUpper(), $entry.Message
@@ -311,7 +300,7 @@ class FileAppender : ILoggerAppender, IDisposable {
     $this._lock.EnterWriteLock()
     try {
       # Re-check disposal after acquiring lock
-      if ($this._isDisposed -or $null -eq $this._writer) { return }
+      if ($this._IsDisposed -or $null -eq $this._writer) { return }
       $this._writer.WriteLine($logLine)
       # AutoFlush is true
     } catch {
@@ -323,7 +312,7 @@ class FileAppender : ILoggerAppender, IDisposable {
 
   [void] Dispose() {
     # Prevent new logs trying to acquire lock while disposing
-    $this._isDisposed = $true
+    $this._IsDisposed = $true
 
     $this._lock.EnterWriteLock() # Acquire lock to ensure no writes are happening
     try {
@@ -350,19 +339,17 @@ class FileAppender : ILoggerAppender, IDisposable {
 
 # A logger that does nothing. Useful as a default or for disabling logging.
 class NullLogger : Logger {
-  hidden static [NullLogger]$_instance = [NullLogger]::new()
-  # static [NullLogger] Instance { get { return [NullLogger]::_instance } }
-
-  # Implement required methods/properties from Logger concept (or ILogger if defined)
-  [List[ILoggerAppender]]$Appenders = [List[ILoggerAppender]]::new() # Empty list
-  [Type]$EntryType = [LoggerEntry] # Can be default
+  [Type]$EntryType = [LoggerEntry]
+  [List[ILoggerAppender]]$Appenders = [List[ILoggerAppender]]::new()
   [LogEventType]$MinimumLevel = [LogEventType]::Fatal + 1 # Set above highest level to disable all
+  hidden static [NullLogger]$Instance = [NullLogger]::new()
+  NullLogger() {}
   [void] Log([LogEventType]$severity, [string]$message, [Exception]$exception = $null) { } # No-op
   [void] Debug([string]$message) { }
-  [void] Information([string]$message) { }
+  [void] Info([string]$message) { }
   [void] Warning([string]$message) { }
-  [void] Error([string]$message, [Exception]$exception = $null) { }
-  [void] Fatal([string]$message, [Exception]$exception = $null) { }
+  [void] Error([string]$message, [Exception]$exception) { }
+  [void] Fatal([string]$message, [Exception]$exception) { }
   [bool] IsEnabled([LogEventType]$level) { return $false }
 }
 
