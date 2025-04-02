@@ -63,7 +63,7 @@ class Logger : PsModuleBase, IDisposable {
   static [Logger] From([string]$LogDirectory, [ref]$o) {
     if (![IO.Directory]::Exists($LogDirectory)) {
       try {
-        [void][Logger]::CreateFolder($LogDirectory)
+        PsModuleBase\New-Directory $LogDirectory
         $o.Value.LogDirectory = [IO.DirectoryInfo]::new($LogDirectory)
       } catch {
         Write-Error "Failed to create log directory '$($o.Value.LogDirectory)':`n$_"
@@ -347,7 +347,7 @@ class NullLogger : Logger {
 }
 
 $typestoExport = @(
-  [Logger], [ILoggerEntry], [LogEventType], [ConsoleAppender],
+  [Logger], [ILoggerEntry], [ILoggerAppender], [LogEventType], [ConsoleAppender],
   [JsonAppender], [FileAppender], [NullLogger], [LoggerEntry]
 )
 # Register Type Accelerators
