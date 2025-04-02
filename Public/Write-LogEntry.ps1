@@ -1,7 +1,7 @@
 function Write-LogEntry {
   <#
   .SYNOPSIS
-    Writes a log message using a specified logger instance.
+    Writes a log message of a specified logger instance.
   .DESCRIPTION
     Logs a message with a given severity level to all appenders configured
     in the provided logger instance, provided the severity meets the logger's MinimumLevel.
