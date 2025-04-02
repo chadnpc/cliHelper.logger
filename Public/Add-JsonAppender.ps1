@@ -23,41 +23,40 @@
   .LINK
     New-Logger
   #>
-  [CmdletBinding(SupportsShouldProcess = $false)] # Adding appender modifies object state, not system state
+  [CmdletBinding(SupportsShouldProcess = $false)]
   param(
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory = $false)]
     [ValidateNotNull()]
     [Logger]$Logger,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory = $false)]
+    [ValidateScript({
+        if ([string]::IsNullOrWhiteSpace($_)) {
+          throw [System.ArgumentNullException]::new("JsonFilePath", "Please provide a valid file path")
+        }
+      }
+    )][Alias('o', 'outFile')]
     [string]$JsonFilePath
   )
 
   Process {
-    # Check if the logger is disposed
-    # Again, a public IsDisposed property would be cleaner.
-
-    if ([string]::IsNullOrWhiteSpace($JsonFilePath)) {
-      Write-Error "JsonFilePath cannot be empty."
-      return
-    }
-
     try {
-      # Resolve the path
-      $resolvedPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($JsonFilePath)
-      Write-Verbose "Attempting to add JsonAppender for path: $resolvedPath"
-
-      # Create the appender. Constructor handles directory creation and file opening.
+      if ([string]::IsNullOrWhiteSpace($JsonFilePath)) {
+        throw [System.IO.InvalidDataException]::new("JsonFilePath cannot be empty.")
+      }
+      $resolvedPath = [Logger]::GetUnResolvedPath($JsonFilePath)
+      Write-Debug "[Logger] Attempting to add JsonAppender for path: $resolvedPath"
       $jsonAppender = [JsonAppender]::new($resolvedPath)
-
-      # Add the appender to the logger's list
       $Logger.Appenders.Add($jsonAppender)
-
-      Write-Verbose "Successfully added JsonAppender for path '$resolvedPath'."
-      # Optionally return the logger for chaining, though less common for 'Add' cmdlets
-      # Write-Output $Logger
+      Write-Debug "[Logger] Successfully added JsonAppender for path '$resolvedPath'."
     } catch {
-      Write-Error "Failed to add JsonAppender for path '$resolvedPath': $_"
+      $PSCmdlet.ThrowTerminatingError([System.Management.Automation.ErrorRecord]::new(
+          $_.Exception, "FAILED_TO_ADD_JSONAPPENDER", [System.Management.Automation.ErrorCategory]::InvalidOperation,
+          @{
+            Path = $resolvedPath
+          }
+        )
+      )
       # Clean up the partially created appender if it implements IDisposable and failed *after* creation but *before* adding?
       # In this case, the constructor throws, so $jsonAppender wouldn't be assigned on failure.
     }
