@@ -10,7 +10,7 @@ Write-Host "      Version       $moduleVersion`n"
 
 Get-Module -Name $ModuleName | Remove-Module # Make sure no versions of the module are loaded
 
-Write-Host "[+] Reading module information ..." -ForegroundColor Green
+Write-Host "[+] Reading module Info ..." -ForegroundColor Green
 $script:ModuleInformation = Import-Module -Name "$ModulePath" -PassThru
 $script:ModuleInformation | Format-List
 
