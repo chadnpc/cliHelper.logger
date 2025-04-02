@@ -31,7 +31,7 @@ Import-Module cliHelper.logger
 # 1. Create a logger instance (defaults to Info level, Console and File appenders)
 #    Logs will go to .\Logs\default.log by default relative to the module path,
 #    or specify a custom directory.
-$logPath = Join-Path $env:TEMP "MyAppLogs"; $logger = New-Logger -LogDirectory $logPath -MinimumLevel Debug
+$logPath = Join-Path $env:TEMP "MyAppLogs"; $logger = New-Logger -LogDir $logPath -Level Debug
 
 # It's critical to use try/finally to ensure Dispose() is called!
 try {
