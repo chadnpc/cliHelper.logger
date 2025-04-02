@@ -25,29 +25,22 @@
   #>
   [CmdletBinding(SupportsShouldProcess = $false)]
   param(
-    [Parameter(Mandatory = $false)]
+    [Parameter(Mandatory = $false, ValueFromPipeline = $true)]
     [ValidateNotNull()]
     [Logger]$Logger,
 
     [Parameter(Mandatory = $false)]
-    [ValidateScript({
-        if ([string]::IsNullOrWhiteSpace($_)) {
-          throw [System.ArgumentNullException]::new("JsonFilePath", "Please provide a valid file path")
-        }
-      }
-    )][Alias('o', 'outFile')]
+    [ValidateNotNullOrWhiteSpace()][Alias('FilePath')]
     [string]$JsonFilePath
   )
 
   Process {
     try {
-      if ([string]::IsNullOrWhiteSpace($JsonFilePath)) {
-        throw [System.IO.InvalidDataException]::new("JsonFilePath cannot be empty.")
-      }
       $resolvedPath = [Logger]::GetUnResolvedPath($JsonFilePath)
+      if (![IO.File]::Exists($resolvedPath)) { New-Item -Path $resolvedPath -ItemType File -Force | Out-Null }
       Write-Debug "[Logger] Attempting to add JsonAppender for path: $resolvedPath"
       $jsonAppender = [JsonAppender]::new($resolvedPath)
-      $Logger.Appenders.Add($jsonAppender)
+      $Logger.Appenders += $jsonAppender
       Write-Debug "[Logger] Successfully added JsonAppender for path '$resolvedPath'."
     } catch {
       $PSCmdlet.ThrowTerminatingError([System.Management.Automation.ErrorRecord]::new(
