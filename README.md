@@ -25,12 +25,12 @@ Import-Module cliHelper.logger
 # 1. Create a logger instance (defaults to Info level, Console and File appenders)
 #    Logs will go to .\Logs\default.log by default relative to the module path,
 #    or specify a custom directory.
-$logPath = Join-Path $env:TEMP "MyAppLogs"; $logger = New-Logger -LogDir $logPath -Level Debug
+$logPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs"); $logger = New-Logger -LogDir $logPath -Level Debug
 
 # It's critical to use try/finally to ensure Dispose() is called!
 try {
-  Write-LogEntry -Logger $logger -Severity Info -Message "Application started in directory: $logPath"
-  Write-LogEntry -Logger $logger -Severity Debug -Message "Configuration loaded."
+  $logger | Write-LogEntry -Level Info -Message "Application started in directory: $logPath"
+  $logger | Write-LogEntry -Level Debug -Message "Configuration loaded."
 
   # Simulate an operation
   $user = "TestUser"
@@ -41,11 +41,10 @@ try {
     Get-Item -Path "C:\NonExistentFile.txt" -ErrorAction Stop
   } catch {
     # Log the error with the exception details
-    Write-LogEntry -Logger $logger -Severity Error -Message "Failed to access critical file." -Exception $_
+    $logger | Write-LogEntry -Severity Error -Message "Failed to access critical file." -Exception $_.Exception
   }
-
   Write-LogEntry -Logger $logger -Severity Warning -Message "Operation completed with warnings."
-
+  Write-Host "Check logs in $logPath"
 } finally {
   # 2. IMPORTANT: Dispose the logger to flush buffers and release file handles
   if ($null -ne $logger) {
@@ -53,25 +52,19 @@ try {
     $logger.Dispose()
   }
 }
-
-Write-Host "Check logs in $logPath"
 # Check the console output and the 'default.log' file in $logPath
 ```
 
 ### Usage with Cmdlets
 
 ```PowerShell
-$logPath = Join-Path $env:TEMP "MyAppLogs"
-$logger = New-Logger -LogDirectory $logPath
+$logPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs"); $logger = New-Logger -LogDir $logPath
 
 try {
   # Add a JSON appender to the same logger
-  $jsonLogFile = Join-Path $logPath "events.json"
-  Add-JsonAppender -Logger $logger -JsonFilePath $jsonLogFile
-  Write-LogEntry -Logger $logger -Severity Info -Message "Added JSON appender. Logs now go to Console, default.log, and events.json"
-
-  $logger.Information("This message goes to all three appenders.") # Direct method call also works
-
+  $logger | Add-JsonAppender -FilePath ([IO.Path]::Combine($logPath, "events.json"))
+  $logger | Write-LogEntry -Severity Info -Message "Added JSON appender. Logs now go to Console, default.log, and events.json"
+  $logger.Info("This message goes to all three appenders.") # Direct method call also works
 } finally {
   $logger.Dispose()
 }
@@ -88,39 +81,39 @@ For more control or when building your own modules/tools, you can use the classe
 Import-Module cliHelper.logger
 
 # Define log directory
-$logDir = Join-Path $env:TEMP "MyToolLogs"
+$logDir = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs")
 
 # 1. Create logger instance directly
-$sdkLogger = [Logger]::new($logDir) # Constructor ensures directory exists
+$ObjectLogger = [Logger]::new($logDir) # Constructor ensures directory exists
 
 # Set minimum level
-$sdkLogger.MinimumLevel = [LogEventType]::Debug
+$ObjectLogger.MinimumLevel = [LogEventType]::Debug
 
 # 2. Create and add appenders manually
 $console = [ConsoleAppender]::new()
 $file = [FileAppender]::new((Join-Path $logDir "mytool.log"))
 $json = [JsonAppender]::new((Join-Path $logDir "mytool_metrics.json"))
 
-$sdkLogger.Appenders.Add($console)
-$sdkLogger.Appenders.Add($file)
-$sdkLogger.Appenders.Add($json)
+$ObjectLogger.Appenders += $console
+$ObjectLogger.Appenders += $file
+$ObjectLogger.Appenders += $json
 
-# 3. Use the logger's methods directly (within try/finally)
+# 3. Use logger methods directly (within try/finally)
 try {
-  $sdkLogger.Information("SDK Logger Initialized. Appenders: $($sdkLogger.Appenders.Count)")
-  $sdkLogger.Debug("Detailed trace message.")
+  $ObjectLogger.Info("Object Logger Initialized. with $($ObjectLogger.Appenders.Count) appenders.")
+  $ObjectLogger.Debug("Detailed trace message.")
 
+  # simulate a failure:
   try {
     throw [System.IO.FileNotFoundException]::new("Required config file missing", "config.xml")
   } catch {
-    $sdkLogger.Fatal("Cannot start tool - configuration error.", $_)
+    $ObjectLogger.Fatal("Cannot start tool - configuration error.", $_)
   }
-
 } finally {
   # 4. IMPORTANT: Dispose the logger
-  if ($null -ne $sdkLogger) {
-    $sdkLogger.Dispose()
-    Write-Host "SDK Logger Disposed."
+  if ($null -ne $ObjectLogger) {
+    $ObjectLogger.Dispose()
+    Write-Host "Object Logger Disposed."
   }
 }
 
@@ -157,11 +150,11 @@ class CustomEntry : ILoggerEntry {
 # Create a logger with the custom entry type
 $customLogger = [Logger]::new()
 $customLogger.EntryType = [CustomEntry]
-$customLogger.Appenders.Add([ConsoleAppender]::new()) # Standard appender
+$customLogger.Appenders += [ConsoleAppender]::new() # Standard appender
 
 try {
   # When logging, the custom NewEntry factory method is called
-  $customLogger.Information("Logging event with custom entry type.")
+  $customLogger.Info("Logging event with custom entry type.")
   # Note: Standard appenders won't display CorrelationId by default
   # You would need a custom appender to format/use it.
 } finally {
@@ -180,7 +173,7 @@ try {
 
     try {
       # ... Your code that uses the logger ...
-      $logger.Information("Doing work...")
+      $logger.Info("Doing work...")
     } catch {
       # Optional: Log exceptions from your main code block
       $logger.Error("An error occurred in the main block.", $_)
