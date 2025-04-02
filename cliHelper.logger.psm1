@@ -46,10 +46,9 @@ class LoggerEntry : ILoggerEntry {
 
 class Logger : PsModuleBase, IDisposable {
   [LogEventType] $MinimumLevel = [LogEventType]::Info
-  [ValidateNotNullOrEmpty()][IO.DirectoryInfo] $LogDirectory
-  [ValidateNotNullOrEmpty()][List[ILoggerAppender]] $Appenders
+  [ValidateNotNull()][IO.DirectoryInfo] $LogDirectory
+  [ValidateNotNull()][ILoggerAppender[]] $Appenders = @()
   hidden [Type] $_entryType = [LoggerEntry]
-  hidden [bool] $_IsDisposed = $false
   hidden [object] $_disposeLock = [object]::new()
   Logger() {
     [void][Logger]::From(
@@ -60,7 +59,7 @@ class Logger : PsModuleBase, IDisposable {
   Logger([string]$LogDirectory) {
     [void][Logger]::From($LogDirectory, [ref]$this)
   }
-  static [Logger] From([string]$LogDirectory, [ref]$o) {
+  static hidden [Logger] From([string]$LogDirectory, [ref]$o) {
     if (![IO.Directory]::Exists($LogDirectory)) {
       try {
         PsModuleBase\New-Directory $LogDirectory
@@ -70,7 +69,6 @@ class Logger : PsModuleBase, IDisposable {
         # Decide if this should be fatal or just prevent file logging later
       }
     }
-    $o.Value.Appenders = [List[ILoggerAppender]]::new()
     $o.Value.PsObject.Properties.Add([PsScriptProperty]::new('EntryType', { return $this._entryType }, {
           param($value)
           if ($value -is [Type] -and $value.GetInterfaces().Name -contains 'ILoggerEntry') {
@@ -84,27 +82,18 @@ class Logger : PsModuleBase, IDisposable {
     return $o.Value
   }
   [bool] IsEnabled([LogEventType]$level) {
-    return (!$this._IsDisposed) -and ($level -ge $this.MinimumLevel)
+    return (!$this.IsDisposed) -and ($level -ge $this.MinimumLevel)
   }
-
-  [void] Log([LogEventType]$severity, [string]$message, [Exception]$exception = $null) {
-    if (!$this.IsEnabled($severity)) {
-      return
+  [void] Log([LogEventType]$severity, [string]$message) {
+    $this.Log($severity, $message, $null)
+  }
+  [void] Log([LogEventType]$severity, [string]$message, [Exception]$exception) {
+    if ($this.IsEnabled($severity)) {
+      $this.Log($this.CreateEntry($severity, $message, $exception))
     }
-    $entry = $this.CreateEntry($severity, $message, $exception)
-    $this.ProcessEntry($entry)
   }
-  [ILoggerEntry] CreateEntry([LogEventType]$severity, [string]$message) {
-    return $this.CreateEntry($severity, $message, $null)
-  }
-  [ILoggerEntry] CreateEntry([LogEventType]$severity, [string]$message, [Exception]$exception) {
-    return $this.EntryType::Create($severity, $message, $exception)
-  }
-
-  [void] ProcessEntry([ILoggerEntry]$entry) {
-    # Iterate through a copy in case appenders list is modified during enumeration (less likely without async)
-    $appendersCopy = $this.Appenders.ToArray()
-    foreach ($appender in $appendersCopy) {
+  [void] Log([ILoggerEntry]$entry) {
+    foreach ($appender in $this.Appenders) {
       try {
         $appender.Log($entry)
       } catch {
@@ -113,7 +102,15 @@ class Logger : PsModuleBase, IDisposable {
       }
     }
   }
-
+  [ILoggerEntry] CreateEntry([LogEventType]$severity, [string]$message) {
+    return $this.CreateEntry($severity, $message, $null)
+  }
+  [ILoggerEntry] CreateEntry([LogEventType]$severity, [string]$message, [Exception]$exception) {
+    if ($null -ne ($this.EntryType | Get-Member -MemberType Method -Static -Name Create)) {
+      return $this.EntryType::Create($severity, $message, $exception)
+    }
+    return $this.EntryType::New($severity, $message, $exception)
+  }
   # --- Convenience Methods ---
   [void] Info([string]$message) { $this.Log([LogEventType]::Info, $message) }
   [void] Debug([string]$message) { $this.Log([LogEventType]::Debug, $message) }
@@ -127,23 +124,20 @@ class Logger : PsModuleBase, IDisposable {
   [void] Fatal([string]$message, [Exception]$exception = $null) { $this.Log([LogEventType]::Fatal, $message, $exception) }
 
   [void] Dispose() {
-    lock ($this._disposeLock) {
-      if ($this._IsDisposed) { return }
-
-      # Dispose appenders that implement IDisposable
-      foreach ($appender in $this.Appenders) {
-        if ($appender -is [IDisposable]) {
-          try {
-            $appender.Dispose()
-          } catch {
-            Write-Error "Error disposing appender '$($appender.GetType().Name)': $_"
-          }
+    if ($this.IsDisposed) { return }
+    # Dispose appenders that implement IDisposable
+    foreach ($appender in $this.Appenders) {
+      if ($appender -is [IDisposable]) {
+        try {
+          $appender.Dispose()
+        } catch {
+          Write-Error "Error disposing appender '$($appender.GetType().Name)': $_"
         }
       }
-      # Clear the list to prevent further use and release references
-      $this.Appenders.Clear()
-      $this._IsDisposed = $true
     }
+    # Clear the list to prevent further use and release references
+    $this.Appenders.Clear()
+    $this.PsObject.Properties.Add([psscriptproperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("IsDisposed is read-only") }))
     [void][System.GC]::SuppressFinalize($this)
   }
 }
@@ -181,13 +175,12 @@ class ConsoleAppender : ILoggerAppender {
 
 # Appender that writes log entries as JSON objects to a file
 class JsonAppender : ILoggerAppender, IDisposable {
-  [string]$FilePath
-  hidden [StreamWriter]$_writer
-  hidden [object]$_lock = [object]::new()
-  hidden [bool]$_IsDisposed = $false
+  [ValidateNotNullOrWhiteSpace()][string]$FilePath
+  hidden [ValidateNotNull()][StreamWriter]$_writer
+  hidden [ValidateNotNull()][object]$_lock = [object]::new()
 
   JsonAppender([string]$Path) {
-    $this.FilePath = Convert-Path $Path # Resolve path
+    $this.FilePath = [Logger]::GetUnResolvedPath($Path)
     # Ensure directory exists
     $dir = Split-Path $this.FilePath -Parent
     if (!(Test-Path $dir)) {
@@ -207,7 +200,7 @@ class JsonAppender : ILoggerAppender, IDisposable {
   }
 
   [void] Log([ILoggerEntry]$entry) {
-    if ($this._IsDisposed) { return }
+    if ($this.IsDisposed) { return }
 
     # Create the object to serialize
     $logObject = [ordered]@{
@@ -221,34 +214,27 @@ class JsonAppender : ILoggerAppender, IDisposable {
     # Convert to JSON
     $jsonLine = $logObject | ConvertTo-Json -Compress -Depth 5 # Depth important for exceptions
 
-    # Lock and write
-    lock ($this._lock) {
-      # Re-check disposal after acquiring lock
-      if ($this._IsDisposed -or $null -eq $this._writer) { return }
-      try {
-        $this._writer.WriteLine($jsonLine)
-        # AutoFlush is true, manual flush shouldn't be needed unless guaranteeing write before potential crash
-      } catch {
-        Write-Error "JsonAppender failed to write to '$($this.FilePath)': $_"
-        # Consider fallback or temporary disable mechanism here
-      }
+    if ($this.IsDisposed -or $null -eq $this._writer) { return }
+    try {
+      $this._writer.WriteLine($jsonLine)
+      # AutoFlush is true, manual flush shouldn't be needed unless guaranteeing write before potential crash
+    } catch {
+      throw [System.Exception]::new("JsonAppender failed to write to '$($this.FilePath)'", $_.Exception)
     }
   }
 
   [void] Dispose() {
-    lock ($this._lock) {
-      if ($this._IsDisposed) { return }
-      if ($null -ne $this._writer) {
-        try {
-          $this._writer.Flush() # Final flush
-          $this._writer.Dispose()
-        } catch {
-          Write-Error "JsonAppender error during dispose for file '$($this.FilePath)': $_"
-        }
-        $this._writer = $null
+    if ($this.IsDisposed) { return }
+    if ($null -ne $this._writer) {
+      try {
+        $this._writer.Flush() # Final flush
+        $this._writer.Dispose()
+      } catch {
+        Write-Error "JsonAppender error during dispose for file '$($this.FilePath)': $_"
       }
-      $this._IsDisposed = $true
+      $this._writer = $null
     }
+    $this.PsObject.Properties.Add([psscriptproperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("IsDisposed is read-only") }))
   }
 }
 
@@ -257,10 +243,10 @@ class FileAppender : ILoggerAppender, IDisposable {
   [string]$FilePath
   hidden [StreamWriter]$_writer
   hidden [ReaderWriterLockSlim]$_lock = [ReaderWriterLockSlim]::new()
-  hidden [bool]$_IsDisposed = $false
 
   FileAppender([string]$Path) {
-    $this.FilePath = Convert-Path $Path # Resolve path
+    $this.FilePath = [Logger]::GetUnResolvedPath($Path)
+    if (![IO.File]::Exists($this.FilePath)) { throw [FileNotFoundException]::new("File '$Path'. Logging to this file may not work.") }
     # Ensure directory exists
     $dir = Split-Path $this.FilePath -Parent
     if (!(Test-Path $dir)) {
@@ -280,7 +266,7 @@ class FileAppender : ILoggerAppender, IDisposable {
   }
 
   [void] Log([ILoggerEntry]$entry) {
-    if ($this._IsDisposed) { return }
+    if ($this.IsDisposed) { return }
 
     # Format the log line
     $logLine = "[{0:u}] [{1,-11}] {2}" -f $entry.Timestamp, $entry.Severity.ToString().ToUpper(), $entry.Message
@@ -290,12 +276,11 @@ class FileAppender : ILoggerAppender, IDisposable {
       $exceptionText = ($entry.Exception.ToString() -split '\r?\n' | ForEach-Object { "  $_" }) -join "`n"
       $logLine += "`n$($exceptionText)"
     }
-
     # Acquire write lock
-    $this._lock.EnterWriteLock()
+    # $this._lock.EnterWriteLock()
     try {
       # Re-check disposal after acquiring lock
-      if ($this._IsDisposed -or $null -eq $this._writer) { return }
+      if ($this.IsDisposed -or $null -eq $this._writer) { return }
       $this._writer.WriteLine($logLine)
       # AutoFlush is true
     } catch {
@@ -307,9 +292,7 @@ class FileAppender : ILoggerAppender, IDisposable {
 
   [void] Dispose() {
     # Prevent new logs trying to acquire lock while disposing
-    $this._IsDisposed = $true
-
-    $this._lock.EnterWriteLock() # Acquire lock to ensure no writes are happening
+    # $this._lock.EnterWriteLock() # Acquire lock to ensure no writes are happening
     try {
       if ($null -ne $this._writer) {
         try {
@@ -318,13 +301,12 @@ class FileAppender : ILoggerAppender, IDisposable {
         } catch {
           Write-Error "FileAppender error during dispose for file '$($this.FilePath)': $_"
         }
-        $this._writer = $null
       }
     } finally {
       $this._lock.ExitWriteLock()
     }
-    # Dispose the lock itself
-    $this._lock.Dispose()
+    $this.PsObject.Properties.Add([psscriptproperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("IsDisposed is read-only") }))
+    # $this._lock.Dispose()
   }
 }
 
@@ -333,7 +315,6 @@ class FileAppender : ILoggerAppender, IDisposable {
 # A logger that does nothing. Useful as a default or for disabling logging.
 class NullLogger : Logger {
   [Type]$EntryType = [LoggerEntry]
-  [List[ILoggerAppender]]$Appenders = [List[ILoggerAppender]]::new()
   [LogEventType]$MinimumLevel = [LogEventType]::Fatal + 1 # Set above highest level to disable all
   hidden static [NullLogger]$Instance = [NullLogger]::new()
   NullLogger() {}
