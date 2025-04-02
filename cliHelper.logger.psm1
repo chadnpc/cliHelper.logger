@@ -1,11 +1,12 @@
 ﻿#!/usr/bin/env pwsh
-
 using namespace System.IO
 using namespace System.Text
 using namespace System.Threading
 using namespace System.Collections.Generic
 using namespace System.Management.Automation
 using namespace System.Collections.Concurrent
+
+#Requires -Modules PsModuleBase
 
 # Enums
 enum LogEventType {
@@ -43,35 +44,33 @@ class LoggerEntry : ILoggerEntry {
   }
 }
 
-class Logger : IDisposable {
-  [IO.DirectoryInfo] $LogDirectory
-  [List[ILoggerAppender]] $Appenders
+class Logger : PsModuleBase, IDisposable {
   [LogEventType] $MinimumLevel = [LogEventType]::Info
+  [ValidateNotNullOrEmpty()][IO.DirectoryInfo] $LogDirectory
+  [ValidateNotNullOrEmpty()][List[ILoggerAppender]] $Appenders
   hidden [Type] $_entryType = [LoggerEntry]
   hidden [bool] $_IsDisposed = $false
   hidden [object] $_disposeLock = [object]::new()
-  static [IO.DirectoryInfo] $DefaultLogDirectory = [IO.Path]::Combine($PSScriptRoot, 'Logs')
   Logger() {
-    [void][Logger]::From($null, [ref]$this)
+    [void][Logger]::From(
+      [IO.Path]::Combine([IO.Path]::GetTempPath(), [guid]::newguid().guid, 'Logs'),
+      [ref]$this
+    )
   }
   Logger([string]$LogDirectory) {
     [void][Logger]::From($LogDirectory, [ref]$this)
   }
   static [Logger] From([string]$LogDirectory, [ref]$o) {
-    $o.Value.Appenders = [List[ILoggerAppender]]::new()
-    # Use provided directory or the static default if null/empty
-    $o.Value.LogDirectory = [string]::IsNullOrWhiteSpace($LogDirectory) ? ([Logger]::DefaultLogDirectory) : $LogDirectory
-    # Ensure the target directory exists if specified and non-null
-    if (![string]::IsNullOrWhiteSpace($o.Value.LogDirectory)) {
-      if (!(Test-Path $o.Value.LogDirectory)) {
-        try {
-          New-Item -Path $o.Value.LogDirectory -ItemType Directory -Force -ErrorAction Stop | Out-Null
-        } catch {
-          Write-Error "Failed to create log directory '$($o.Value.LogDirectory)': $_"
-          # Decide if this should be fatal or just prevent file logging later
-        }
+    if (![IO.Directory]::Exists($LogDirectory)) {
+      try {
+        [void][Logger]::CreateFolder($LogDirectory)
+        $o.Value.LogDirectory = [IO.DirectoryInfo]::new($LogDirectory)
+      } catch {
+        Write-Error "Failed to create log directory '$($o.Value.LogDirectory)':`n$_"
+        # Decide if this should be fatal or just prevent file logging later
       }
     }
+    $o.Value.Appenders = [List[ILoggerAppender]]::new()
     $o.Value.PsObject.Properties.Add([PsScriptProperty]::new('EntryType', { return $this._entryType }, {
           param($value)
           if ($value -is [Type] -and $value.GetInterfaces().Name -contains 'ILoggerEntry') {
@@ -95,9 +94,10 @@ class Logger : IDisposable {
     $entry = $this.CreateEntry($severity, $message, $exception)
     $this.ProcessEntry($entry)
   }
-
+  [ILoggerEntry] CreateEntry([LogEventType]$severity, [string]$message) {
+    return $this.CreateEntry($severity, $message, $null)
+  }
   [ILoggerEntry] CreateEntry([LogEventType]$severity, [string]$message, [Exception]$exception) {
-    # Use the configured EntryType's static factory method
     return $this.EntryType::Create($severity, $message, $exception)
   }
 
