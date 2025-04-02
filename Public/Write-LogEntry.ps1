@@ -37,12 +37,15 @@ function Write-LogEntry {
     [Logger]$Logger,
 
     [Parameter(Mandatory)]
+    [Alias('msg')]
     [string]$Message,
 
-    [Parameter(Mandatory)]
-    [LogEventType]$Severity,
+    [Parameter(Mandatory = $false)]
+    [Alias('l', 'level')]
+    [LogEventType]$Severity = 1,
 
     [Parameter()]
+    [Alias('e')][AllowNull()]
     [System.Exception]$Exception # Optional Exception parameter
   )
 
@@ -56,7 +59,7 @@ function Write-LogEntry {
       # Logger methods now handle the IsEnabled check internally
       switch ($Severity) {
         Debug { $Logger.Debug($Message) }
-        Information { $Logger.Information($Message) }
+        Info { $Logger.Information($Message) }
         Warning { $Logger.Warning($Message) }
         Error { $Logger.Error($Message, $Exception) }
         Fatal { $Logger.Fatal($Message, $Exception) }
