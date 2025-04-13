@@ -60,7 +60,7 @@ Describe "Module tests for $($([Environment]::GetEnvironmentVariable($env:RUN_ID
       "*", [System.IO.SearchOption]::AllDirectories
     ).Where({ $_.Extension -in ('.ps1', '.psd1', '.psm1') })
     $testCase = $_scripts | ForEach-Object { @{ file = $_ } }
-    It "ie: each Script/Ps1file should have valid Powershell sysntax" -TestCases $testCase {
+    It "ie: each ps1file should have valid Powershell sysntax" -TestCases $testCase {
       param($file) $contents = Get-Content -Path $file.fullname -ErrorAction Stop
       $errors = $null; [void][System.Management.Automation.PSParser]::Tokenize($contents, [ref]$errors)
       $errors.Count | Should -Be 0
