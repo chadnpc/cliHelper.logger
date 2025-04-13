@@ -32,9 +32,9 @@ function New-Logger {
     Example:
     $logger = New-Logger
     try {
-      $logger.Information("Starting process...")
+      $logger.Info("Starting process...")
       # ... your code ...
-      $logger.Information("Process finished.")
+      $logger.Info("Process finished.")
     }
     finally {
       $logger.Dispose()
@@ -49,7 +49,7 @@ function New-Logger {
 
     # The base name for the default log file created by the FileAppender.
     [Parameter(Mandatory = $false)]
-    [Alias('fname')]
+    [Alias('fname')][ValidateNotNullOrWhiteSpace()]
     [string]$FileName = "log_$(Get-Date -Format 'yyyyMMdd-HHmmss')-$(New-Guid).log",
 
     # Sets the minimum severity level for messages to be processed by the logger.
