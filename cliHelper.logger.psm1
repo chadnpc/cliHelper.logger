@@ -12,7 +12,7 @@ using namespace System.Collections.Concurrent
 enum LogEventType {
   Debug = 0    # Detailed diagnostic Info
   Info = 1     # General operational information
-  Warning = 2  # Indicates a potential problem
+  Warn = 2     # Indicates a potential problem
   Error = 3    # A recoverable error occurred
   Fatal = 4    # Critical conditions, system may be unusable (same as Critical/Alert/Emergency)
 }
@@ -29,36 +29,15 @@ class ILoggerEntry {
   [Exception]$Exception
   [LogEventType]$Severity
   [datetime]$Timestamp = [datetime]::UtcNow
-}
 
-class ILogAppender {
-  hidden [LogAppenderType]$type
-  [void] Log([ILoggerEntry]$entry) {
-    [ValidateNotNull()][ILoggerEntry]$entry = $entry
-    Write-Warning "Log method not implemented in $($this.GetType().Name)"
-  }
-  [string] GetlogLine([ILoggerEntry]$entry) {
-    [ValidateNotNull()][ILoggerEntry]$entry = $entry
-    # Create a logObject
-    $lob = [ordered]@{
-      timestamp = $entry.Timestamp.ToString('o') # ISO 8601 format
-      severity  = $entry.Severity.ToString()
-      message   = $entry.Message
+  [Hashtable] ToHashtable() {
+    return @{
+      timestamp = $this.Timestamp.ToString('o') # ISO 8601 format
+      severity  = $this.Severity.ToString()
+      message   = $this.Message
       # Include full exception string if present
-      exception = if ($null -ne $entry.Exception) { $entry.Exception.ToString() } else { '' }
+      exception = if ($null -ne $this.Exception) { $this.Exception.ToString() } else { '' }
     }
-    $line = switch ($this.type) {
-      "Console" { "[{0:u}] [{1,-8}] {2}" -f $lob.Timestamp, $lob.Severity.ToString().ToUpper(), $lob.Message; break }
-      "Json" { ($lob | ConvertTo-Json -Compress -Depth 5) + ','; break }
-      "XML" { throw [System.NotImplementedException]::new("xml") ; break }
-      Default {
-        throw [System.NotImplementedException]::new("xml")
-      }
-    }
-    return $line
-  }
-  [string] ToString() {
-    return $this.type + "Appender"
   }
 }
 
@@ -75,26 +54,47 @@ class LoggerEntry : ILoggerEntry {
   }
 }
 
-# Appender that writes to the PowerShell console with colors
-class ConsoleAppender : ILogAppender {
-  static [hashtable]$ColorMap = @{
-    Debug   = [ConsoleColor]::DarkGray
-    Info    = [ConsoleColor]::Green
-    Warning = [ConsoleColor]::Yellow
-    Error   = [ConsoleColor]::Red
-    Fatal   = [ConsoleColor]::Magenta
-  }
-
+class LogAppender : IDisposable {
+  hidden [ValidateNotNullOrEmpty()][LogAppenderType]$type
   [void] Log([ILoggerEntry]$entry) {
-    # Check if host supports colors - might be unnecessary in modern PS
-    $color = [ConsoleAppender]::ColorMap[$entry.Severity.ToString()]
-    $timestamp = $entry.Timestamp.ToString('HH:mm:ss') # Concise timestamp for console
-    $message = "[$timestamp] [$($entry.Severity.ToString().ToUpper())] $($entry.Message)"
+    [ValidateNotNull()][ILoggerEntry]$entry = $entry
+    Write-Warning "Log method not implemented in $($this.GetType().Name)"
+  }
+  [string] GetlogLine([ILoggerEntry]$entry) {
+    [ValidateNotNull()][ILoggerEntry]$entry = $entry
+    $logb = $entry.ToHashtable()
+    $line = switch ($this.type) {
+      "Console" { "[{0:u}] [{1,-5}] {2}" -f $logb.Timestamp, $logb.Severity.ToString().Trim().ToUpper(), $logb.Message; break }
+      "Json" { ($logb | ConvertTo-Json -Compress -Depth 5) + ','; break }
+      "XML" { $logb | ConvertTo-CliXml -Depth 5; break }
+      Default {
+        throw [RuntimeException]::new("value '$($this.Type)' is not of type 'LogAppenderType'")
+      }
+    }
+    return $line
+  }
+  [void] Dispose() {
+    if ($this.IsDisposed) { return }
+    $this.PsObject.Properties.Add([psscriptproperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("IsDisposed is a read-only Property") }))
+  }
+  [string] ToString() {
+    [string]$tn = '{0}' -f $this.type
+    [ValidateNotNullOrWhiteSpace()][string]$tn = $tn
+    return "[{0}Appender]" -f $tn
+  }
+}
 
-    # Write message
-    Write-Host $message -ForegroundColor $color
-
-    # Write exception details if present, use Write-Error for visibility
+# Appender that writes to the PowerShell console with colors
+class ConsoleAppender : LogAppender {
+  static [hashtable]$ColorMap = @{
+    Debug = [ConsoleColor]::DarkGray
+    Info  = [ConsoleColor]::Green
+    Warn  = [ConsoleColor]::Yellow
+    Error = [ConsoleColor]::Red
+    Fatal = [ConsoleColor]::Magenta
+  }
+  [void] Log([ILoggerEntry]$entry) {
+    Write-Host $this.GetlogLine($entry) -f ([ConsoleAppender]::ColorMap[$entry.Severity.ToString()])
     if ($null -ne $entry.Exception) {
       # Format exception concisely for console
       $exceptionMessage = "  Exception: $($entry.Exception.GetType().Name): $($entry.Exception.Message)"
@@ -106,62 +106,10 @@ class ConsoleAppender : ILogAppender {
   }
 }
 
-# Appender that writes log entries as JSON objects to a file
-class JsonAppender : ILogAppender, IDisposable {
-  [ValidateNotNullOrWhiteSpace()][string]$FilePath
-  hidden [ValidateNotNull()][StreamWriter]$_writer
-  hidden [ValidateNotNull()][object]$_lock = [object]::new()
-
-  JsonAppender([string]$Path) {
-    $this.FilePath = [Logger]::GetUnResolvedPath($Path)
-    # Ensure directory exists
-    $dir = Split-Path $this.FilePath -Parent
-    if (!(Test-Path $dir)) {
-      try {
-        New-Item -Path $dir -ItemType Directory -Force -ErrorAction Stop | Out-Null
-      } catch {
-        throw "Failed to create directory for JSON appender '$dir': $_"
-      }
-    }
-    try {
-      # Open file for appending with UTF8 encoding
-      $this._writer = [StreamWriter]::new($this.FilePath, $true, [Encoding]::UTF8)
-      $this._writer.AutoFlush = $true # Flush after every write
-    } catch {
-      throw "Failed to open file for JSON appender '$($this.FilePath)': $_"
-    }
-  }
-
-  [void] Log([ILoggerEntry]$entry) {
-    if ($this.IsDisposed -or $null -eq $this._writer) { return }
-    try {
-      $this._writer.WriteLine($this.GetlogLine($entry))
-      # AutoFlush is true, manual flush shouldn't be needed unless guaranteeing write before potential crash
-    } catch {
-      throw [RuntimeException]::new("JsonAppender failed to write to '$($this.FilePath)'", $_.Exception)
-    }
-  }
-  [string] ToString() {
-    return $this.FilePath
-  }
-  [void] Dispose() {
-    if ($this.IsDisposed) { return }
-    if ($null -ne $this._writer) {
-      try {
-        $this._writer.Flush() # Final flush
-        $this._writer.Dispose()
-      } catch {
-        throw [RuntimeException]::new("JsonAppender error during dispose of file '$($this.FilePath)'", $_.Exception)
-      }
-    }
-    $this.PsObject.Properties.Add([psscriptproperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a read-only Property") }))
-  }
-}
-
 # Appender that writes formatted text logs to a file
-class FileAppender : ILogAppender, IDisposable {
-  [ValidateNotNullOrWhiteSpace()][string]$FilePath
+class FileAppender : LogAppender {
   hidden [StreamWriter]$_writer
+  hidden [ValidateNotNullOrWhiteSpace()][string]$FilePath
   hidden [ReaderWriterLockSlim]$_lock = [ReaderWriterLockSlim]::new()
 
   FileAppender([string]$Path) {
@@ -173,7 +121,7 @@ class FileAppender : ILogAppender, IDisposable {
       try {
         New-Item -Path $dir -ItemType Directory -Force -ErrorAction Stop | Out-Null
       } catch {
-        throw [RuntimeException]::new("Failed to create directory for File appender '$dir'", $_.Exception)
+        throw [RuntimeException]::new("Failed to create directory '$dir'", $_.Exception)
       }
     }
     try {
@@ -181,7 +129,7 @@ class FileAppender : ILogAppender, IDisposable {
       $this._writer = [StreamWriter]::new($this.FilePath, $true, [Encoding]::UTF8)
       $this._writer.AutoFlush = $true # Flush after every write
     } catch {
-      throw [RuntimeException]::new("FileAppender Failed to open file '$($this.FilePath)'", $_.Exception)
+      throw [RuntimeException]::new("Failed to open file '$($this.FilePath)'", $_.Exception)
     }
   }
 
@@ -207,32 +155,46 @@ class FileAppender : ILogAppender, IDisposable {
       $this._lock.ExitWriteLock()
     }
   }
-  [string] ToString() {
-    return $this.FilePath
-  }
   [void] Dispose() {
-    # Prevent new logs trying to acquire lock while disposing
-    $this._lock.EnterWriteLock() # Acquire lock to ensure no writes are happening
-    try {
-      if ($null -ne $this._writer) {
-        try {
-          $this._writer.Flush()
-          $this._writer.Dispose()
-        } catch {
-          throw [RuntimeException]::new("FileAppender failed during dispose of file '$($this.FilePath)'", $_.Exception)
-        }
+    if ($this.IsDisposed) { return }
+    if ($null -ne $this._writer) {
+      try {
+        # Prevent new logs trying to acquire lock while disposing
+        $this._lock.EnterWriteLock() # Acquire lock to ensure no writes are happening
+        $this._writer.Flush() # Final flush
+        $this._writer.Dispose()
+      } catch {
+        throw [RuntimeException]::new("error during dispose of file '$($this.FilePath)'", $_.Exception)
+      } finally {
+        $this._lock.ExitWriteLock()
       }
-    } finally {
-      $this._lock.ExitWriteLock()
     }
-    $this.PsObject.Properties.Add([psscriptproperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a read-only Property") }))
+    $this.PsObject.Properties.Add([psscriptproperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("IsDisposed is a read-only Property") }))
     $this._lock.Dispose()
   }
 }
 
+# Appender that writes log entries as JSON objects to a file
+class JsonAppender : FileAppender {
+  JsonAppender([string]$Path) : base($Path) {}
+  [void] Log([ILoggerEntry]$entry) {
+    if ($this.IsDisposed) { throw [System.InvalidOperationException]::new("$($this.GetType().Name) is already disposed") }
+    try {
+      $this._writer.WriteLine($this.GetlogLine($entry))
+      # AutoFlush is true, manual flush shouldn't be needed unless guaranteeing write before potential crash
+    } catch {
+      throw [RuntimeException]::new("JsonAppender failed to write to '$($this.FilePath)'", $_.Exception)
+    }
+  }
+}
+
+class XMLAppender : FileAppender {
+  XMLAppender([string]$Path) : base($Path) {}
+}
+
 class Logger : PsModuleBase, IDisposable {
-  [LogEventType] $MinimumLevel = [LogEventType]::Info
-  hidden [ValidateNotNull()][ILogAppender[]] $Appenders = @()
+  [LogEventType] $MinLevel = [LogEventType]::Info
+  hidden [ValidateNotNull()][LogAppender[]] $Appenders = @()
   hidden [object] $_disposeLock = [object]::new()
   hidden [Type] $_entryType = [LoggerEntry]
   hidden [ValidateNotNull()] $_logdirectory
@@ -275,7 +237,10 @@ class Logger : PsModuleBase, IDisposable {
     return $o.Value
   }
   [bool] IsEnabled([LogEventType]$level) {
-    return (!$this.IsDisposed) -and ($level -ge $this.MinimumLevel)
+    return (!$this.IsDisposed) -and ($level -ge $this.MinLevel)
+  }
+  [IO.FileInfo[]] GetlogFiles() {
+    return $this.Logdirectory.EnumerateFiles()
   }
   [void] Log([LogEventType]$severity, [string]$message) {
     $this.Log($severity, $message, $null)
@@ -315,7 +280,7 @@ class Logger : PsModuleBase, IDisposable {
     }
     $this.AddLogAppender($a)
   }
-  [void] AddLogAppender([ILogAppender]$LogAppender) {
+  [void] AddLogAppender([LogAppender]$LogAppender) {
     if ($null -ne $this.Appenders) {
       if ($this.Appenders.type.contains($LogAppender.type)) {
         return
@@ -336,7 +301,7 @@ class Logger : PsModuleBase, IDisposable {
   [void] Info([string]$message) { $this.Log([LogEventType]::Info, $message) }
   [void] Debug([string]$message) { $this.Log([LogEventType]::Debug, $message) }
 
-  [void] Warning([string]$message) { $this.Log([LogEventType]::Warning, $message) }
+  [void] Warn([string]$message) { $this.Log([LogEventType]::Warning, $message) }
 
   [void] Error([string]$message) { $this.Error($message, $null) }
   [void] Error([string]$message, [Exception]$exception) { $this.Log([LogEventType]::Error, $message, $exception) }
@@ -347,7 +312,7 @@ class Logger : PsModuleBase, IDisposable {
   [string] ToString() {
     return @{
       EntryType    = $this.EntryType
-      MinimumLevel = $this.MinimumLevel
+      MinLevel     = $this.MinLevel
       Logdirectory = $this.Logdirectory
       Appenders    = $this.Appenders ? ([IO.FileInfo[]]($this.Appenders.FilePath)).Name :@()
     } | ConvertTo-Json
@@ -377,21 +342,21 @@ class Logger : PsModuleBase, IDisposable {
 # A logger that does nothing. Useful as a default or for disabling logging.
 class NullLogger : Logger {
   [Type]$EntryType = [LoggerEntry]
-  [LogEventType]$MinimumLevel = [LogEventType]::Fatal + 1 # Set above highest level to disable all
+  [LogEventType]$MinLevel = [LogEventType]::Fatal + 1 # Set above highest level to disable all
   hidden static [NullLogger]$Instance = [NullLogger]::new()
   NullLogger() {}
   [void] Log([LogEventType]$severity, [string]$message, [Exception]$exception = $null) { } # No-op
   [void] Debug([string]$message) { }
   [void] Info([string]$message) { }
-  [void] Warning([string]$message) { }
+  [void] Warn([string]$message) { }
   [void] Error([string]$message, [Exception]$exception) { }
   [void] Fatal([string]$message, [Exception]$exception) { }
   [bool] IsEnabled([LogEventType]$level) { return $false }
 }
 
 $typestoExport = @(
-  [Logger], [ILoggerEntry], [ILogAppender], [LogEventType], [ConsoleAppender],
-  [JsonAppender], [FileAppender], [NullLogger], [LoggerEntry]
+  [Logger], [ILoggerEntry], [LogAppender], [LogEventType], [ConsoleAppender],
+  [JsonAppender], [LogAppenderType], [FileAppender], [NullLogger], [LoggerEntry]
 )
 # Register Type Accelerators
 $TypeAcceleratorsClass = [PsObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')
