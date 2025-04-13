@@ -4,26 +4,26 @@ function Write-LogEntry {
     Writes a log message of a specified logger instance.
   .DESCRIPTION
     Logs a message with a given severity level to all appenders configured
-    in the provided logger instance, provided the severity meets the logger's MinimumLevel.
+    in the provided logger instance, provided the severity meets the logger's MinLevel.
   .PARAMETER Logger
     The logger instance (created via New-Logger or directly) to use for logging.
   .PARAMETER Message
     The main text of the log message.
   .PARAMETER Severity
     The severity level of the message. Must be one of the LogEventType enum values
-    (Debug, Information, Warning, Error, Fatal).
+    (Debug, Info, Warn, Error, Fatal).
   .PARAMETER Exception
     [Optional] An Exception object associated with the log entry, typically used
     with Error or Fatal severity.
   .EXAMPLE
     $logger = New-Logger
     try {
-      Write-LogEntry -Logger $logger -Message "Application starting." -Severity Information
+      Write-LogEntry -l $logger -Message "Application starting." -level Information
       # ... code that might throw ...
       $riskyResult = Get-Something risky
-      Write-LogEntry -Logger $logger -Message "Operation successful." -Severity Debug
+      Write-LogEntry -l $logger -Message "Operation successful." -level Debug
     } catch {
-      Write-LogEntry -Logger $logger -Message "An error occurred during operation." -Severity Error -Exception $_
+      Write-LogEntry -l $logger -Message "An error occurred during operation." -level Error -Exception $_
     } finally {
       $logger.Dispose()
     }
@@ -33,7 +33,7 @@ function Write-LogEntry {
   [CmdletBinding()]
   param(
     [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
-    [ValidateNotNull()]
+    [Alias('l')][ValidateNotNull()]
     [Logger]$Logger,
 
     [Parameter(Mandatory = $true)]
@@ -41,7 +41,7 @@ function Write-LogEntry {
     [string]$Message,
 
     [Parameter(Mandatory = $false)]
-    [Alias('l', 'level')]
+    [Alias('s', 'level')]
     [LogEventType]$Severity = 1,
 
     [Parameter(Mandatory = $false)]
