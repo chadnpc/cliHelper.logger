@@ -33,16 +33,16 @@ try {
 
   # Simulate an operation
   $user = "TestUser"
-  Write-LogEntry -Logger $logger -Severity Debug -Message "Processing request for user: $user"
+  Write-LogEntry -l $logger -level Debug -Message "Processing request for user: $user"
 
   # Simulate an error
   try {
     Get-Item -Path "C:\NonExistentFile.txt" -ErrorAction Stop
   } catch {
     # Log the error with the exception details
-    $logger | Write-LogEntry -Severity Error -Message "Failed to access critical file." -Exception $_.Exception
+    $logger | Write-LogEntry -level Error -Message "Failed to access critical file." -Exception $_.Exception
   }
-  Write-LogEntry -Logger $logger -Severity Warning -Message "Operation completed with warnings."
+  Write-LogEntry -l $logger -level Warn -Message "Operation completed with warnings."
   Write-Host "Check logs in $logPath"
 } finally {
   # 2. IMPORTANT: Dispose the logger to flush buffers and release file handles
@@ -59,7 +59,7 @@ $logger = New-Logger -Logdir $logPath
 try {
   # Add a JSON appender to the same logger
   $logger | Add-JsonAppender
-  $logger | Write-LogEntry -Severity Info -Message "Added JSON appender. Logs now go to Console, `$env:TMP/*{guid-filename}.log, and `$env:TMP/*{guid-filename}.json"
+  $logger | Write-LogEntry -level Info -Message "Added JSON appender. Logs now go to Console, `$env:TMP/*{guid-filename}.log, and `$env:TMP/*{guid-filename}.json"
   $logger.Info("This message goes to all appenders.") # Direct method call also works
 } finally {
   $logger.Dispose()
@@ -83,7 +83,7 @@ $Logdir = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs")
 $ObjectLogger = [Logger]::new($Logdir) # Constructor ensures directory exists
 
 # Set minimum level
-$ObjectLogger.MinimumLevel = [LogEventType]::Debug
+$ObjectLogger.MinLevel = [LogEventType]::Debug
 
 # 2. Create and add appenders manually
 $console = [ConsoleAppender]::new()
@@ -124,13 +124,13 @@ You can create custom classes implementing `ILoggerEntry` if you need to add mor
 # Define your custom class
 class CustomEntry : ILoggerEntry {
   [LogEventType]$Severity
-  [string]$Message
   [Exception]$Exception
   [datetime]$Timestamp = [datetime]::UtcNow
+  [ValidateNotNullOrWhiteSpace()][string]$Message
   [string]$CorrelationId # Custom field
 
   # Factory method (required pattern)
-  static [ILoggerEntry] Create([LogEventType]$severity, [string]$message, [System.Exception]$exception) {
+  static [CustomEntry] Create([LogEventType]$severity, [string]$message, [System.Exception]$exception) {
     # You might generate or retrieve CorrelationId here
     $id = (Get-Random -Maximum 10000).ToString("D5")
     return [CustomEntry]@{
