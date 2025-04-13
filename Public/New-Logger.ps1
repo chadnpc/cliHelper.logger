@@ -15,7 +15,7 @@ function New-Logger {
     $logger.Dispose()
   .EXAMPLE
     # Create a logger with only Debug messages and above, default location
-    $logger = New-Logger -MinimumLevel Debug
+    $logger = New-Logger -MinLevel Debug
     # Log messages...
     $logger.Dispose()
   .EXAMPLE
@@ -53,13 +53,13 @@ function New-Logger {
     [string]$FileName = "log_$(Get-Date -Format 'yyyyMMdd-HHmmss')-$(New-Guid).log",
 
     # Sets the minimum severity level for messages to be processed by the logger.
-    # Defaults to 'Info'. Valid values are from the LogEventType enum (Debug, Information, Warning, Error, Fatal).
+    # Defaults to 'Info'. Valid values are from the LogEventType enum (Debug, Info, Warn, Error, Fatal).
     [Parameter(Mandatory = $false)]
     [Alias('Level')]
-    [LogEventType]$MinimumLevel = [LogEventType]::Info,
+    [LogEventType]$MinLevel = 'Info',
 
     # has Console appender by default
-    [ILogAppender[]]$Appenders = @([ConsoleAppender]::new())
+    [LogAppender[]]$Appenders = @([ConsoleAppender]::new())
   )
   begin {
     $ob = $null
@@ -68,7 +68,7 @@ function New-Logger {
     try {
       # Create logger instance. The constructor will handle Logdirectory creation.
       $ob = [Logger]::new($Logdirectory)
-      $ob.MinimumLevel = $MinimumLevel
+      $ob.MinLevel = $MinLevel
       if ($Appenders.count -gt 0) {
         $Appenders.ForEach({ $ob.Appenders += $_ })
       }
@@ -76,7 +76,7 @@ function New-Logger {
       if (![IO.File]::Exists($logFilePath)) { New-Item -Path $logFilePath -ItemType File -Force | Out-Null }
       $ob.Appenders += [FileAppender]::new($logFilePath)
       Write-Debug "[Logger] Added FileAppender for path '$logFilePath'."
-      Write-Debug "[Logger] created with MinimumLevel '$MinimumLevel' and Logdirectory '$($ob.Logdirectory)'."
+      Write-Debug "[Logger] created with MinLevel '$MinLevel' and Logdirectory '$($ob.Logdirectory)'."
     } catch {
       $PSCmdlet.ThrowTerminatingError([System.Management.Automation.ErrorRecord]::new(
           $_.Exception, "FAILED_TO_CREATE_LOGGER", [System.Management.Automation.ErrorCategory]::InvalidOperation,
