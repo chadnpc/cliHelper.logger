@@ -20,7 +20,8 @@ enum LogEventType {
 enum LogAppenderType {
   Console = 0 # writes to console
   Json = 1    # writes to json file
-  XML = 2     # writes to XML file
+  File = 2    # writes to a .log file
+  XML = 3     # writes to XML file
 }
 
 # marker classes for log entry data
@@ -55,7 +56,7 @@ class LoggerEntry : ILoggerEntry {
 }
 
 class LogAppender : IDisposable {
-  hidden [ValidateNotNullOrEmpty()][LogAppenderType]$type
+  hidden [ValidateNotNullOrEmpty()][LogAppenderType]$type = "File"
   [void] Log([ILoggerEntry]$entry) {
     [ValidateNotNull()][ILoggerEntry]$entry = $entry
     Write-Warning "Log method not implemented in $($this.GetType().Name)"
@@ -78,9 +79,9 @@ class LogAppender : IDisposable {
     $this.PsObject.Properties.Add([psscriptproperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("IsDisposed is a read-only Property") }))
   }
   [string] ToString() {
-    [string]$tn = '{0}' -f $this.type
+    [string]$tn = '{0}' -f $this.PsObject.TypeNames[0]
     [ValidateNotNullOrWhiteSpace()][string]$tn = $tn
-    return "[{0}Appender]" -f $tn
+    return "[{0}]" -f $tn
   }
 }
 
@@ -262,27 +263,13 @@ class Logger : PsModuleBase, IDisposable {
     }
   }
   [void] AddLogAppender() {
-    $this.AddLogAppender([LogAppenderType]0)
-  }
-  [void] AddLogAppender([LogAppenderType]$type) {
-    $a = switch ($type) {
-      'Console' {
-        [ConsoleAppender]::new();
-        break
-      }
-      'Json' {
-        [JsonAppender]::new();
-        break
-      }
-      Default {
-        throw [InvalidDataException]::new("InvalidType")
-      }
-    }
-    $this.AddLogAppender($a)
+    $this.AddLogAppender([ConsoleAppender]::new())
   }
   [void] AddLogAppender([LogAppender]$LogAppender) {
     if ($null -ne $this.Appenders) {
-      if ($this.Appenders.type.contains($LogAppender.type)) {
+      $a = $LogAppender.type.ToString() + "Appender"
+      if ($this.Appenders.GetEnumerator().Where({ $_.PsObject.TypeNames[0] -eq $a }).count -gt 0) {
+        Write-Verbose "[$a] is already added"
         return
       }
     }
