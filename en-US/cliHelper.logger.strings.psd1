@@ -15,7 +15,6 @@
 ### Appenders
 - [ConsoleAppender] for colored terminal output
 - [FileAppender] for persistent log storage
-- Custom appender interface (ILogAppender)
 
 ### Log Types
 - [LogEventType] enum with 5 severity levels
