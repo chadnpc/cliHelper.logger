@@ -10,22 +10,29 @@ using namespace System.Collections.Concurrent
 
 # Enums
 enum LogEventType {
-  Debug = 0       # Detailed diagnostic Info
-  Info = 1        # General operational information
-  Warning = 2     # Indicates a potential problem
-  Error = 3       # A recoverable error occurred
-  Fatal = 4       # Critical conditions, system may be unusable (same as Critical/Alert/Emergency)
+  Debug = 0    # Detailed diagnostic Info
+  Info = 1     # General operational information
+  Warning = 2  # Indicates a potential problem
+  Error = 3    # A recoverable error occurred
+  Fatal = 4    # Critical conditions, system may be unusable (same as Critical/Alert/Emergency)
+}
+
+enum LogAppenderType {
+  Console = 0 # writes to console
+  Json = 1    # writes to json file
+  XML = 2     # writes to XML file
 }
 
 # marker classes for log entry data
 class ILoggerEntry {
   [string]$Message
-  [LogEventType]$Severity
   [Exception]$Exception
+  [LogEventType]$Severity
   [datetime]$Timestamp = [datetime]::UtcNow
 }
 
 class ILogAppender {
+  hidden [LogAppenderType]$type
   [void] Log([ILoggerEntry]$entry) {
     Write-Warning "Log method not implemented in $($this.GetType().Name)"
   }
@@ -101,6 +108,33 @@ class Logger : PsModuleBase, IDisposable {
         Write-Error "Logger failed processing appender '$($appender.GetType().Name)': $_"
       }
     }
+  }
+  [void] AddLogAppender() {
+    $this.AddLogAppender([LogAppenderType]0)
+  }
+  [void] AddLogAppender([LogAppenderType]$type) {
+    $a = switch ($type) {
+      'Console' {
+        [ConsoleAppender]::new();
+        break
+      }
+      'Json' {
+        [JsonAppender]::new();
+        break
+      }
+      Default {
+        throw [InvalidDataException]::new("InvalidType")
+      }
+    }
+    $this.AddLogAppender($a)
+  }
+  [void] AddLogAppender([ILogAppender]$LogAppender) {
+    if ($null -ne $this.Appenders) {
+      if ($this.Appenders.type.contains($LogAppender.type)) {
+        return
+      }
+    }
+    $this.Appenders += $LogAppender
   }
   [ILoggerEntry] CreateEntry([LogEventType]$severity, [string]$message) {
     return $this.CreateEntry($severity, $message, $null)
