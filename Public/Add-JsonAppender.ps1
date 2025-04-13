@@ -9,8 +9,8 @@
 
   .EXAMPLE
     $logger = New-Logger
-    Add-JsonAppender -Logger $logger -JsonFilePath "C:\MyApp\Logs\application_events.json"
-    $logger.Information("JSON appender added")
+    $logger | Add-JsonAppender "app_events.json"
+    $logger.Info("JSON appender added")
     # ... log more ...
     $logger.Dispose()
   .LINK
@@ -22,30 +22,32 @@
   #>
   [CmdletBinding(SupportsShouldProcess = $false)]
   param(
-    # The logger instance (created via New-Logger or directly) to modify.
-    [Parameter(Mandatory = $false, ValueFromPipeline = $true)]
-    [ValidateNotNull()]
-    [Logger]$Logger,
-
-    # The full path to the file where JSON log entries should be written.
+    # A JSON fileName where log entries should be written.
     [Parameter(Mandatory = $false)]
-    [ValidateNotNullOrWhiteSpace()][Alias('FilePath')]
-    [string]$JsonFilePath
+    [Alias('n', 'fname')][ValidateNotNullOrWhiteSpace()]
+    [string]$FileName = "log_$(Get-Date -Format 'yyyyMMdd-HHmmss')-$(New-Guid).json",
+
+    # The logger instance (created via New-Logger or directly) to modify.
+    [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+    [Alias('l')][ValidateNotNull()]
+    [Logger]$Logger
   )
 
   Process {
     try {
-      $resolvedPath = [Logger]::GetUnResolvedPath($JsonFilePath)
-      if (![IO.File]::Exists($resolvedPath)) { New-Item -Path $resolvedPath -ItemType File -Force | Out-Null }
-      Write-Debug "[Logger] Attempting to add JsonAppender for path: $resolvedPath"
-      $jsonAppender = [JsonAppender]::new($resolvedPath)
-      $Logger.Appenders += $jsonAppender
-      Write-Debug "[Logger] Successfully added JsonAppender for path '$resolvedPath'."
+      if (!$Logger.Logdirectory.Exists) {
+        throw "Please set the `$Logger.Logdirectory first!"
+      }
+      $JsonFilePath = [Logger]::GetUnResolvedPath([IO.Path]::Combine($Logger.Logdirectory, $FileName))
+      if (![IO.File]::Exists($JsonFilePath)) { New-Item -Path $JsonFilePath -ItemType File -Force | Out-Null }
+      Write-Debug "[Logger] Attempting to add JsonAppender for path: $JsonFilePath"
+      $Logger.AddLogAppender([JsonAppender]::new($JsonFilePath))
+      Write-Debug "[Logger] Successfully added JsonAppender for path '$JsonFilePath'."
     } catch {
       $PSCmdlet.ThrowTerminatingError([System.Management.Automation.ErrorRecord]::new(
           $_.Exception, "FAILED_TO_ADD_JSONAPPENDER", [System.Management.Automation.ErrorCategory]::InvalidOperation,
           @{
-            Path      = $resolvedPath
+            Path      = $JsonFilePath
             Timestamp = [datetime]::UtcNow
           }
         )
