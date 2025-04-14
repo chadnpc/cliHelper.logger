@@ -189,7 +189,7 @@ class JsonAppender : FileAppender {
   }
   [LogEntry[]] ReadAllEntries() {
     if ([IO.File]::Exists($this.FilePath)) {
-      '[{0}]' -f ([IO.File]::ReadAllText($this.FilePath)) | ConvertFrom-Json
+      return '[{0}]' -f ([IO.File]::ReadAllText($this.FilePath)) | ConvertFrom-Json
     }
     return @()
   }
@@ -199,7 +199,7 @@ class XMLAppender : FileAppender {
   XMLAppender([string]$Path) : base($Path) {}
   [LogEntry[]] ReadAllEntries() {
     if ([IO.File]::Exists($this.FilePath)) {
-      [IO.File]::ReadAllText($this.FilePath) | ConvertFrom-CliXml
+      return [IO.File]::ReadAllText($this.FilePath) | ConvertFrom-CliXml
     }
     return @()
   }
