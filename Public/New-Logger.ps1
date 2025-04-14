@@ -59,7 +59,7 @@ function New-Logger {
     [LogLevel]$MinLevel = 'Info',
 
     # has Console appender by default
-    [LogAppender[]]$Appenders = @([ConsoleAppender]::new())
+    [LogAppender[]]$appenders = @([ConsoleAppender]::new())
   )
   begin {
     $ob = $null
@@ -69,12 +69,12 @@ function New-Logger {
       # Create logger instance. The constructor will handle Logdirectory creation.
       $ob = [Logger]::new($Logdirectory)
       $ob.MinLevel = $MinLevel
-      if ($Appenders.count -gt 0) {
-        $Appenders.ForEach({ $ob.Appenders += $_ })
+      if ($appenders.count -gt 0) {
+        $appenders.ForEach({ $ob._appenders += $_ })
       }
       $logFilePath = [IO.Path]::Combine($Logdirectory, $FileName)
       if (![IO.File]::Exists($logFilePath)) { New-Item -Path $logFilePath -ItemType File -Force | Out-Null }
-      $ob.Appenders += [FileAppender]::new($logFilePath)
+      $ob._appenders += [FileAppender]::new($logFilePath)
       Write-Debug "[Logger] Added FileAppender for path '$logFilePath'."
       Write-Debug "[Logger] created with MinLevel '$MinLevel' and Logdirectory '$($ob.Logdirectory)'."
     } catch {

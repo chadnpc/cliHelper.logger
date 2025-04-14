@@ -29,24 +29,24 @@ enum LogAppenderType {
 # New-Object LogEntry
 class LogEntry {
   [string]$Message
-  [Exception]$Exception
   [LogLevel]$Severity
+  [Exception]$Exception
   [datetime]$Timestamp = [datetime]::UtcNow
 
   static [LogEntry] Create([LogLevel]$severity, [string]$message, [System.Exception]$exception) {
     return [LogEntry]@{
-      Severity  = $severity
       Message   = $message
+      Severity  = $severity
       Exception = $exception
       Timestamp = [datetime]::UtcNow
     }
   }
   [Hashtable] ToHashtable() {
     return @{
-      timestamp = $this.Timestamp.ToString('o') # ISO 8601 format
-      severity  = $this.Severity.ToString()
-      message   = $this.Message
-      exception = ($null -ne $this.Exception) ? $this.Exception.ToString() : [string]::Empty
+      Message   = $this.Message
+      Severity  = $this.Severity.ToString()
+      Timestamp = $this.Timestamp.ToString('o') # ISO 8601 format
+      Exception = ($null -ne $this.Exception) ? $this.Exception.ToString() : [string]::Empty
     }
   }
 }
@@ -60,14 +60,14 @@ class LogAppender : IDisposable {
     throw [System.NotImplementedException]::new("Log method not implemented in $($this.GetType().Name)")
   }
   [string] GetlogLine([LogEntry]$entry) {
-    [ValidateNotNull()][LogEntry]$entry = $entry
-    $logb = $entry.ToHashtable()
+    [ValidateNotNull()][LogEntry] $entry = $entry
+    $logb = $entry.ToHashtable(); $tn = $this.GetType().Name.Replace("Appender", "").ToUpper()
     $line = switch ($true) {
-      ($this._type -eq "JSON") { ($logb | ConvertTo-Json -Compress -Depth 5) + ','; break }
-      ($this._type -in ("CONSOLE", "FILE")) { "[{0:u}] [{1,-5}] {2}" -f $logb.Timestamp, $logb.Severity.ToString().Trim().ToUpper(), $logb.Message; break }
-      ($this._type -eq "XML") { $logb | ConvertTo-CliXml -Depth 5; break }
-      Default {
-        throw [System.InvalidOperationException]::new("BUG: LogAppenderType of value '$($this._type)' was not expected!")
+      ($tn -eq "JSON") { ($logb | ConvertTo-Json -Compress -Depth 5) + ','; break }
+      ($tn -in ("CONSOLE", "FILE")) { "[{0:u}] [{1,-5}] {2}" -f $logb.Timestamp, $logb.Severity.ToString().Trim().ToUpper(), $logb.Message; break }
+      ($tn -eq "XML") { $logb | ConvertTo-CliXml -Depth 5; break }
+      default {
+        throw [System.InvalidOperationException]::new("BUG: LogAppenderType of value '$tn' was not expected!")
       }
     }
     return $line
@@ -85,11 +85,11 @@ class LogAppender : IDisposable {
 class ConsoleAppender : LogAppender {
   hidden [ValidateNotNullOrEmpty()][LogAppenderType]$_type = "CONSOLE"
   static [hashtable]$ColorMap = @{
-    Debug = [ConsoleColor]::DarkGray
-    Info  = [ConsoleColor]::Green
-    Warn  = [ConsoleColor]::Yellow
-    Error = [ConsoleColor]::Red
-    Fatal = [ConsoleColor]::Magenta
+    DEBUG = [ConsoleColor]::DarkGray
+    INFO  = [ConsoleColor]::Green
+    WARN  = [ConsoleColor]::Yellow
+    ERROR = [ConsoleColor]::Red
+    FATAL = [ConsoleColor]::Magenta
   }
   [void] Log([LogEntry]$entry) {
     Write-Host $this.GetlogLine($entry) -f ([ConsoleAppender]::ColorMap[$entry.Severity.ToString()])
@@ -190,10 +190,10 @@ class XMLAppender : FileAppender {
 }
 
 class Logger : PsModuleBase, IDisposable {
-  [LogLevel] $MinLevel = [LogLevel]::Info
-  hidden [ValidateNotNull()][LogAppender[]] $Appenders = @()
-  hidden [object] $_disposeLock = [object]::new()
+  [LogLevel] $MinLevel = [LogLevel]::INFO
   hidden [Type] $_logBaseType = [LogEntry]
+  hidden [object] $_disposeLock = [object]::new()
+  hidden [ValidateNotNull()] [LogAppender[]] $_appenders = @()
   hidden [ValidateNotNull()] $_logdirectory
   Logger() {
     [void][Logger]::From(
@@ -237,13 +237,13 @@ class Logger : PsModuleBase, IDisposable {
     return (!$this.IsDisposed) -and ($level -ge $this.MinLevel)
   }
   [IO.FileInfo[]] GetlogFiles() {
-    return $this.Appenders.FilePath
+    return $this._appenders.FilePath
   }
   [void] DeleteLogFiles() {
     $this.GetlogFiles().Delete()
   }
   [void] Log([LogEntry]$entry) {
-    foreach ($appender in $this.Appenders) {
+    foreach ($appender in $this._appenders) {
       try {
         $appender.Log($entry)
       } catch {
@@ -261,17 +261,20 @@ class Logger : PsModuleBase, IDisposable {
       Write-Debug "[Logger] [$severity] is disabled. Skipped log message : $message"
     }
   }
+  [LogAppender] GetAppender([LogAppenderType]$type) {
+    return $this._appenders.Where({ $_._type -eq $type })
+  }
   [void] AddLogAppender() {
     $this.AddLogAppender([ConsoleAppender]::new())
   }
   [void] AddLogAppender([LogAppender]$LogAppender) {
-    if ($null -ne $this.Appenders) {
-      if ($this.Appenders._name.Contains($LogAppender._name)) {
+    if ($null -ne $this._appenders) {
+      if ($this._appenders._name.Contains($LogAppender._name)) {
         Write-Warning "$LogAppender is already added"
         return
       }
     }
-    $this.Appenders += $LogAppender
+    $this._appenders += $LogAppender
   }
   [LogEntry] CreateEntry([LogLevel]$severity, [string]$message) {
     return $this.CreateEntry($severity, $message, $null)
@@ -283,23 +286,23 @@ class Logger : PsModuleBase, IDisposable {
     return $this.LogBaseType::New($severity, $message, $exception)
   }
   # --- Convenience Methods ---
-  [void] Info([string]$message) { $this.Log([LogLevel]::Info, $message) }
-  [void] Debug([string]$message) { $this.Log([LogLevel]::Debug, $message) }
+  [void] Info([string]$message) { $this.Log([LogLevel]::INFO, $message) }
+  [void] Debug([string]$message) { $this.Log([LogLevel]::DEBUG, $message) }
 
-  [void] Warn([string]$message) { $this.Log([LogLevel]::Warning, $message) }
+  [void] Warn([string]$message) { $this.Log([LogLevel]::WARN, $message) }
 
   [void] Error([string]$message) { $this.Error($message, $null) }
-  [void] Error([string]$message, [Exception]$exception) { $this.Log([LogLevel]::Error, $message, $exception) }
+  [void] Error([string]$message, [Exception]$exception) { $this.Log([LogLevel]::ERROR, $message, $exception) }
 
   [void] Fatal([string]$message) { $this.Fatal($message, $null) }
-  [void] Fatal([string]$message, [Exception]$exception = $null) { $this.Log([LogLevel]::Fatal, $message, $exception) }
+  [void] Fatal([string]$message, [Exception]$exception = $null) { $this.Log([LogLevel]::FATAL, $message, $exception) }
 
   [string] ToString() {
     return @{
       LogBaseType  = $this.LogBaseType
       MinLevel     = $this.MinLevel
       Logdirectory = $this.Logdirectory
-      Appenders    = $this.Appenders ? ([IO.FileInfo[]]($this.Appenders.FilePath)).Name :@()
+      Appenders    = $this._appenders ? ([IO.FileInfo[]]($this._appenders.FilePath)).Name : @()
     } | ConvertTo-Json
   }
   [void] ClearLogdirectory() {
@@ -309,7 +312,7 @@ class Logger : PsModuleBase, IDisposable {
     if ($this.IsDisposed) { return }
     [void][System.GC]::SuppressFinalize($this)
     # Dispose appenders that implement IDisposable
-    foreach ($appender in $this.Appenders) {
+    foreach ($appender in $this._appenders) {
       if ($appender -is [IDisposable]) {
         try {
           $appender.Dispose()
@@ -319,14 +322,14 @@ class Logger : PsModuleBase, IDisposable {
       }
     }
     # Clear the list to prevent further use and release references
-    $this.Appenders.Clear()
+    $this._appenders.Clear()
     $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a read-only Property") }))
   }
 }
 
 # A logger that does nothing. Useful as a default or for disabling logging.
 class NullLogger : Logger {
-  [LogLevel]$MinLevel = [LogLevel]::Fatal + 1 # Set above highest level to disable all
+  [LogLevel]$MinLevel = [LogLevel]::FATAL + 1 # Set above highest level to disable all
   hidden static [NullLogger]$Instance = [NullLogger]::new()
   NullLogger() {}
   [void] Log([LogLevel]$severity, [string]$message, [Exception]$exception = $null) { } # No-op

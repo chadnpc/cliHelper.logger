@@ -90,13 +90,13 @@ $console = [ConsoleAppender]::new()
 $file = [FileAppender]::new((Join-Path $Logdir "mytool.log"))
 $json = [JsonAppender]::new((Join-Path $Logdir "mytool_metrics.json"))
 
-$ObjectLogger.Appenders += $console
-$ObjectLogger.Appenders += $file
-$ObjectLogger.Appenders += $json
+$ObjectLogger.AddLogAppender($console)
+$ObjectLogger.AddLogAppender($file)
+$ObjectLogger.AddLogAppender($json)
 
 # 3. Use logger methods directly (within try/finally)
 try {
-  $ObjectLogger.Info("Object Logger Initialized. with $($ObjectLogger.Appenders.Count) appenders.")
+  $ObjectLogger.Info("Object Logger Initialized. with $($ObjectLogger._appenders.Count) appenders.")
   $ObjectLogger.Debug("Detailed trace message.")
 
   # simulate a failure:
@@ -145,7 +145,7 @@ class CustomEntry : ILoggerEntry {
 # Create a logger with the custom entry type
 $customLogger = [Logger]::new()
 $customLogger.EntryType = [CustomEntry]
-$customLogger.Appenders += [ConsoleAppender]::new() # ie: log will passthru the console by default.
+$customLogger._appenders += [ConsoleAppender]::new() # ie: log will passthru the console by default.
 
 try {
   # When logging, the custom Create factory method is called
