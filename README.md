@@ -46,7 +46,7 @@ try {
   Write-Host "Check logs in $logPath"
 } finally {
   # 2. IMPORTANT: Dispose the logger to flush buffers and release file handles
-  $logger.Dispose()
+  # $logger.Dispose()
 }
 ```
 
