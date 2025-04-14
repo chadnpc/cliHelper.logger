@@ -110,10 +110,7 @@ class FileAppender : LogAppender {
   hidden [ValidateNotNullOrEmpty()][LogAppenderType]$_type = "File"
 
   FileAppender([string]$Path) {
-    $this.FilePath = [Logger]::GetUnResolvedPath($Path)
-    if (![IO.File]::Exists($this.FilePath)) { throw [FileNotFoundException]::new("File '$Path'. Logging to this file may not work.") }
-    # Ensure directory exists
-    $dir = Split-Path $this.FilePath -Parent
+    $p = [Logger]::GetUnResolvedPath($Path); $dir = Split-Path $p -Parent
     if (!(Test-Path $dir)) {
       try {
         New-Item -Path $dir -ItemType Directory -Force -ErrorAction Stop | Out-Null
@@ -121,13 +118,11 @@ class FileAppender : LogAppender {
         throw [RuntimeException]::new("Failed to create directory '$dir'", $_.Exception)
       }
     }
-    try {
-      # Open file for appending with UTF8 encoding
-      $this._writer = [StreamWriter]::new($this.FilePath, $true, [Encoding]::UTF8)
-      $this._writer.AutoFlush = $true # Flush after every write
-    } catch {
-      throw [RuntimeException]::new("Failed to open file '$($this.FilePath)'", $_.Exception)
-    }
+    if (![IO.File]::Exists($p)) { New-Item -ItemType File -Path $p -ea Stop -Verbose:$false }
+    $this.FilePath = $p
+    # Open file for appending with UTF8 encoding
+    $this._writer = [StreamWriter]::new($this.FilePath, $true, [Encoding]::UTF8)
+    $this._writer.AutoFlush = $true # Flush after every write
   }
   [void] Log([LogEntry]$entry) {
     if ($this.IsDisposed) { return }
