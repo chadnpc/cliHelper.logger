@@ -83,13 +83,10 @@ $obj_lg = [Logger]::new($Logdir) # Constructor ensures directory exists
 $obj_lg.MinLevel = [LogLevel]::Debug
 
 # 2. Create and add appenders manually
-$console = [ConsoleAppender]::new()
-$file = [FileAppender]::new((Join-Path $Logdir "mytool.log"))
-$json = [JsonAppender]::new((Join-Path $Logdir "mytool_metrics.json"))
 
-$obj_lg.AddLogAppender($console)
-$obj_lg.AddLogAppender($file)
-$obj_lg.AddLogAppender($json)
+$obj_lg.AddLogAppender([ConsoleAppender]::new())
+$obj_lg.AddLogAppender([FileAppender]::new((Join-Path $Logdir "mytool.log")))
+$obj_lg.AddLogAppender([JsonAppender]::new((Join-Path $Logdir "mytool_metrics.json")))
 
 # 3. Use logger methods directly (within try/finally)
 try {
