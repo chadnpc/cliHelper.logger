@@ -152,6 +152,10 @@ class FileAppender : LogAppender {
       $this._lock.ExitWriteLock()
     }
   }
+  [LogEntry[]] ReadAllEntries() {
+    # todo: add implementation to read a .log file
+    return @()
+  }
   [void] Dispose() {
     if ($this.IsDisposed) { return }
     if ($null -ne $this._writer) {
@@ -183,18 +187,31 @@ class JsonAppender : FileAppender {
       throw [RuntimeException]::new("JsonAppender failed to write to '$($this.FilePath)'", $_.Exception)
     }
   }
+  [LogEntry[]] ReadAllEntries() {
+    if ([IO.File]::Exists($this.FilePath)) {
+      '[{0}]' -f ([IO.File]::ReadAllText($this.FilePath)) | ConvertFrom-Json
+    }
+    return @()
+  }
 }
 
 class XMLAppender : FileAppender {
   XMLAppender([string]$Path) : base($Path) {}
+  [LogEntry[]] ReadAllEntries() {
+    if ([IO.File]::Exists($this.FilePath)) {
+      [IO.File]::ReadAllText($this.FilePath) | ConvertFrom-CliXml
+    }
+    return @()
+  }
 }
 
 class Logger : PsModuleBase, IDisposable {
   [LogLevel] $MinLevel = [LogLevel]::INFO
+  hidden [IO.FileInfo[]] $_logFiles = @()
   hidden [Type] $_logBaseType = [LogEntry]
-  hidden [object] $_disposeLock = [object]::new()
-  hidden [ValidateNotNull()] [LogAppender[]] $_appenders = @()
+  hidden [Object] $_disposeLock = [Object]::new()
   hidden [ValidateNotNull()] $_logdirectory
+  hidden [ValidateNotNull()] [LogAppender[]] $_appenders = @()
   Logger() {
     [void][Logger]::From(
       [IO.Path]::Combine([IO.Path]::GetTempPath(), [guid]::newguid().guid, 'Logs'),
@@ -220,6 +237,14 @@ class Logger : PsModuleBase, IDisposable {
         }
       )
     )
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogFiles', {
+          if ($this._appenders) { $this._logFiles = $this._appenders.FilePath }
+          return $this._logFiles
+        }, {
+          throw [SetValueException]::new("LogFiles is a read-only Property")
+        }
+      )
+    )
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogBaseType', { return $this._logBaseType }, {
           param($value)
           if ($value -is [Type] -and $value.BaseType.Name -eq 'LogEntry') {
@@ -233,14 +258,11 @@ class Logger : PsModuleBase, IDisposable {
     $o.Value.Logdirectory = $Logdirectory
     return $o.Value
   }
+  [FileAppender[]] GetFileAppenders() {
+    return $this._appenders.Where({ $_.PsObject.TypeNames.Contains("FileAppender") })
+  }
   [bool] IsEnabled([LogLevel]$level) {
     return (!$this.IsDisposed) -and ($level -ge $this.MinLevel)
-  }
-  [IO.FileInfo[]] GetlogFiles() {
-    return $this._appenders.FilePath
-  }
-  [void] DeleteLogFiles() {
-    $this.GetlogFiles().Delete()
   }
   [void] Log([LogEntry]$entry) {
     foreach ($appender in $this._appenders) {
