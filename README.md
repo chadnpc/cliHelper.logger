@@ -37,7 +37,7 @@ try {
 
   # Simulate an error
   try {
-    Get-Item -Path "C:\NonExistentFile.txt" -ErrorAction Stop
+    Get-Item -Path "C:\NonExistentFile.txt" -ea Stop
   } catch {
     # Log the error with the exception details
     $logger | Write-LogEntry -level Error -Message "Failed to access critical file." -Exception $_.Exception
@@ -54,18 +54,16 @@ try {
 
 ```PowerShell
 $logPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs");
-$logger = New-Logger -Logdir $logPath
-
 try {
+  $logger = New-Logger -Logdir $logPath
   # Add a JSON appender to the same logger
   $logger | Add-JsonAppender
   $logger | Write-LogEntry -level Info -Message "Added JSON appender. Logs now go to Console, `$env:TMP/*{guid-filename}.log, and `$env:TMP/*{guid-filename}.json"
   $logger.Info("This message goes to all appenders.") # Direct method call also works
 } finally {
   $logger.Dispose()
+  Write-Host "Check logs in $logPath"
 }
-
-Write-Host "Check logs in $logPath (*filename.log and *filename.json)"
 ```
 
 ### Usage with no cmdlets
