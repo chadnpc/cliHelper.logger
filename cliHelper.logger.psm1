@@ -33,7 +33,7 @@ class LogEntry {
   [Exception]$Exception
   [datetime]$Timestamp = [datetime]::UtcNow
 
-  static [LogEntry] Create([LogLevel]$severity, [string]$message, [System.Exception]$exception) {
+  static [LogEntry] Create([LogLevel]$severity, [string]$message, [Exception]$exception) {
     return [LogEntry]@{
       Message   = $message
       Severity  = $severity
@@ -55,7 +55,7 @@ class LogAppender : IDisposable {
   hidden [ValidateNotNullOrWhiteSpace()][string]$_name = $this.PsObject.TypeNames[0]
   [void] Log([LogEntry]$entry) {
     [ValidateNotNull()][LogEntry]$entry = $entry
-    throw [System.NotImplementedException]::new("Log method not implemented in $($this.GetType().Name)")
+    throw [NotImplementedException]::new("Log method not implemented in $($this.GetType().Name)")
   }
   [string] GetlogLine([LogEntry]$entry) {
     [ValidateNotNull()][LogEntry] $entry = $entry
@@ -65,7 +65,7 @@ class LogAppender : IDisposable {
       ($tn -in ("CONSOLE", "FILE")) { "[{0:u}] [{1,-5}] {2}" -f $logb.Timestamp, $logb.Severity.ToString().Trim().ToUpper(), $logb.Message; break }
       ($tn -eq "XML") { $logb | ConvertTo-CliXml -Depth 5; break }
       default {
-        throw [System.InvalidOperationException]::new("BUG: LogAppenderType of value '$tn' was not expected!")
+        throw [InvalidOperationException]::new("BUG: LogAppenderType of value '$tn' was not expected!")
       }
     }
     return $line
@@ -179,7 +179,7 @@ class JsonAppender : FileAppender {
   hidden [ValidateNotNullOrEmpty()][LogAppenderType]$_type = "JSON"
   JsonAppender([string]$Path) : base($Path) {}
   [void] Log([LogEntry]$entry) {
-    if ($this.IsDisposed) { throw [System.InvalidOperationException]::new("$($this.GetType().Name) is already disposed") }
+    if ($this.IsDisposed) { throw [InvalidOperationException]::new("$($this.GetType().Name) is already disposed") }
     try {
       $this._writer.WriteLine($this.GetlogLine($entry))
       # AutoFlush is true, manual flush shouldn't be needed unless guaranteeing write before potential crash
@@ -327,16 +327,17 @@ class Logger : PsModuleBase, IDisposable {
     }
     return $this.LogType::New($severity, $message, $exception)
   }
-  [LogEntry[]] ReadAllEntries([FileAppender]$appender) {
-    return $this.ReadAllEntries($appender._type)
-  }
   [LogEntry[]] ReadAllEntries([LogAppenderType]$type) {
     $a = $this."$('Get' + $Type + 'Appender')"()
     if ($null -eq $a) { return @() }
     return $a.ReadAllEntries()
   }
+  [LogEntry[]] ReadAllEntries([FileAppender]$appender) {
+    return $this.ReadAllEntries($appender._type)
+  }
   [LogEntry[]] ReadJsonEntries() {
-    return $this.GetJsonAppender().ReadAllEntries()
+    $a = $this.GetJsonAppender()
+    return $a ? $a.ReadAllEntries() : @()
   }
   # --- Convenience Methods ---
   [void] Info([string]$message) { $this.Log([LogLevel]::INFO, $message) }
@@ -359,11 +360,12 @@ class Logger : PsModuleBase, IDisposable {
     } | ConvertTo-Json
   }
   [void] ClearLogdirectory() {
-    $this.Logdirectory.EnumerateFiles().ForEach({ Remove-Item $_.FullName -Force })
+    $files = $this.Logdirectory.EnumerateFiles()
+    $files ? $files.ForEach({ Remove-Item $_.FullName -Force }) : $null
   }
   [void] Dispose() {
     if ($this.IsDisposed) { return }
-    [void][System.GC]::SuppressFinalize($this)
+    [void][GC]::SuppressFinalize($this)
     # Dispose appenders that implement IDisposable
     foreach ($appender in $this._appenders) {
       if ($appender -is [IDisposable]) {
