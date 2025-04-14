@@ -9,84 +9,81 @@ using namespace System.Collections.Concurrent
 #Requires -Modules PsModuleBase
 
 # Enums
-enum LogEventType {
-  Debug = 0    # Detailed diagnostic Info
-  Info = 1     # General operational information
-  Warn = 2     # Indicates a potential problem
-  Error = 3    # A recoverable error occurred
-  Fatal = 4    # Critical conditions, system may be unusable (same as Critical/Alert/Emergency)
+enum LogLevel {
+  DEBUG = 0    # Detailed diagnostic Info
+  INFO = 1     # General operational information
+  WARN = 2     # Indicates a potential problem
+  ERROR = 3    # A recoverable error occurred
+  FATAL = 4    # Critical conditions, system may be unusable (same as Critical/Alert/Emergency)
 }
 
 enum LogAppenderType {
-  Console = 0 # writes to console
-  Json = 1    # writes to json file
-  File = 2    # writes to a .log file
-  XML = 3     # writes to XML file
+  CONSOLE = 0  # writes to console
+  JSON = 1     # writes to a .json file
+  FILE = 2     # writes to a .log file
+  XML = 3      # writes to a .xml file
 }
 
-# marker classes for log entry data
-class ILoggerEntry {
-  [string]$Message
-  [Exception]$Exception
-  [LogEventType]$Severity
-  [datetime]$Timestamp = [datetime]::UtcNow
-
-  [Hashtable] ToHashtable() {
-    return @{
-      timestamp = $this.Timestamp.ToString('o') # ISO 8601 format
-      severity  = $this.Severity.ToString()
-      message   = $this.Message
-      # Include full exception string if present
-      exception = if ($null -ne $this.Exception) { $this.Exception.ToString() } else { '' }
-    }
-  }
-}
 
 # .EXAMPLE
-# [LoggerEntry]::new()
-class LoggerEntry : ILoggerEntry {
-  static [LoggerEntry] Create([LogEventType]$severity, [string]$message, [System.Exception]$exception) {
-    return [LoggerEntry]@{
+# New-Object LogEntry
+class LogEntry {
+  [string]$Message
+  [Exception]$Exception
+  [LogLevel]$Severity
+  [datetime]$Timestamp = [datetime]::UtcNow
+
+  static [LogEntry] Create([LogLevel]$severity, [string]$message, [System.Exception]$exception) {
+    return [LogEntry]@{
       Severity  = $severity
       Message   = $message
       Exception = $exception
       Timestamp = [datetime]::UtcNow
     }
   }
+  [Hashtable] ToHashtable() {
+    return @{
+      timestamp = $this.Timestamp.ToString('o') # ISO 8601 format
+      severity  = $this.Severity.ToString()
+      message   = $this.Message
+      exception = ($null -ne $this.Exception) ? $this.Exception.ToString() : [string]::Empty
+    }
+  }
 }
 
 class LogAppender : IDisposable {
-  hidden [ValidateNotNullOrEmpty()][LogAppenderType]$type = "File"
-  [void] Log([ILoggerEntry]$entry) {
-    [ValidateNotNull()][ILoggerEntry]$entry = $entry
-    Write-Warning "Log method not implemented in $($this.GetType().Name)"
+  hidden [ValidateNotNullOrWhiteSpace()][string]$_name = $this.PsObject.TypeNames[0]
+  hidden [ValidateNotNullOrEmpty()][LogAppenderType]$_type = "File"
+
+  [void] Log([LogEntry]$entry) {
+    [ValidateNotNull()][LogEntry]$entry = $entry
+    throw [System.NotImplementedException]::new("Log method not implemented in $($this.GetType().Name)")
   }
-  [string] GetlogLine([ILoggerEntry]$entry) {
-    [ValidateNotNull()][ILoggerEntry]$entry = $entry
+  [string] GetlogLine([LogEntry]$entry) {
+    [ValidateNotNull()][LogEntry]$entry = $entry
     $logb = $entry.ToHashtable()
-    $line = switch ($this.type) {
-      "Console" { "[{0:u}] [{1,-5}] {2}" -f $logb.Timestamp, $logb.Severity.ToString().Trim().ToUpper(), $logb.Message; break }
-      "Json" { ($logb | ConvertTo-Json -Compress -Depth 5) + ','; break }
-      "XML" { $logb | ConvertTo-CliXml -Depth 5; break }
+    $line = switch ($true) {
+      ($this._type -eq "JSON") { ($logb | ConvertTo-Json -Compress -Depth 5) + ','; break }
+      ($this._type -in ("CONSOLE", "FILE")) { "[{0:u}] [{1,-5}] {2}" -f $logb.Timestamp, $logb.Severity.ToString().Trim().ToUpper(), $logb.Message; break }
+      ($this._type -eq "XML") { $logb | ConvertTo-CliXml -Depth 5; break }
       Default {
-        throw [RuntimeException]::new("value '$($this.Type)' is not of type 'LogAppenderType'")
+        throw [System.InvalidOperationException]::new("BUG: LogAppenderType of value '$($this._type)' was not expected!")
       }
     }
     return $line
   }
   [void] Dispose() {
     if ($this.IsDisposed) { return }
-    $this.PsObject.Properties.Add([psscriptproperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("IsDisposed is a read-only Property") }))
+    $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("IsDisposed is a read-only Property") }))
   }
   [string] ToString() {
-    [string]$tn = '{0}' -f $this.PsObject.TypeNames[0]
-    [ValidateNotNullOrWhiteSpace()][string]$tn = $tn
-    return "[{0}]" -f $tn
+    return "[{0}]" -f $this._name
   }
 }
 
 # Appender that writes to the PowerShell console with colors
 class ConsoleAppender : LogAppender {
+  hidden [ValidateNotNullOrEmpty()][LogAppenderType]$_type = "CONSOLE"
   static [hashtable]$ColorMap = @{
     Debug = [ConsoleColor]::DarkGray
     Info  = [ConsoleColor]::Green
@@ -94,7 +91,7 @@ class ConsoleAppender : LogAppender {
     Error = [ConsoleColor]::Red
     Fatal = [ConsoleColor]::Magenta
   }
-  [void] Log([ILoggerEntry]$entry) {
+  [void] Log([LogEntry]$entry) {
     Write-Host $this.GetlogLine($entry) -f ([ConsoleAppender]::ColorMap[$entry.Severity.ToString()])
     if ($null -ne $entry.Exception) {
       # Format exception concisely for console
@@ -133,8 +130,7 @@ class FileAppender : LogAppender {
       throw [RuntimeException]::new("Failed to open file '$($this.FilePath)'", $_.Exception)
     }
   }
-
-  [void] Log([ILoggerEntry]$entry) {
+  [void] Log([LogEntry]$entry) {
     if ($this.IsDisposed) { return }
     $logLine = $this.GetlogLine($entry)
     # Add exception info if present
@@ -170,7 +166,7 @@ class FileAppender : LogAppender {
         $this._lock.ExitWriteLock()
       }
     }
-    $this.PsObject.Properties.Add([psscriptproperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("IsDisposed is a read-only Property") }))
+    $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("IsDisposed is a read-only Property") }))
     $this._lock.Dispose()
   }
 }
@@ -178,7 +174,7 @@ class FileAppender : LogAppender {
 # Appender that writes log entries as JSON objects to a file
 class JsonAppender : FileAppender {
   JsonAppender([string]$Path) : base($Path) {}
-  [void] Log([ILoggerEntry]$entry) {
+  [void] Log([LogEntry]$entry) {
     if ($this.IsDisposed) { throw [System.InvalidOperationException]::new("$($this.GetType().Name) is already disposed") }
     try {
       $this._writer.WriteLine($this.GetlogLine($entry))
@@ -194,10 +190,10 @@ class XMLAppender : FileAppender {
 }
 
 class Logger : PsModuleBase, IDisposable {
-  [LogEventType] $MinLevel = [LogEventType]::Info
+  [LogLevel] $MinLevel = [LogLevel]::Info
   hidden [ValidateNotNull()][LogAppender[]] $Appenders = @()
   hidden [object] $_disposeLock = [object]::new()
-  hidden [Type] $_entryType = [LoggerEntry]
+  hidden [Type] $_logBaseType = [LogEntry]
   hidden [ValidateNotNull()] $_logdirectory
   Logger() {
     [void][Logger]::From(
@@ -209,7 +205,7 @@ class Logger : PsModuleBase, IDisposable {
     [void][Logger]::From($Logdirectory, [ref]$this)
   }
   static hidden [Logger] From([string]$Logdirectory, [ref]$o) {
-    $o.Value.PsObject.Properties.Add([PsScriptProperty]::new('Logdirectory', [scriptblock]::Create("return [IO.DirectoryInfo]`$this._logdirectory.ToString()"), {
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Logdirectory', [scriptblock]::Create("return [IO.DirectoryInfo]`$this._logdirectory.ToString()"), {
           param($value)
           $Ld = [Logger]::GetUnResolvedPath($value)
           if (![IO.Directory]::Exists($Ld)) {
@@ -224,12 +220,12 @@ class Logger : PsModuleBase, IDisposable {
         }
       )
     )
-    $o.Value.PsObject.Properties.Add([PsScriptProperty]::new('EntryType', { return $this._entryType }, {
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogBaseType', { return $this._logBaseType }, {
           param($value)
-          if ($value -is [Type] -and $value.BaseType.Name -eq 'ILoggerEntry') {
-            $this._entryType = $value
+          if ($value -is [Type] -and $value.BaseType.Name -eq 'LogEntry') {
+            $this._logBaseType = $value
           } else {
-            throw [SetValueException]::new("EntryType must be a Type that implements ILoggerEntry")
+            throw [SetValueException]::new("LogBaseType must be a Type that implements LogEntry")
           }
         }
       )
@@ -237,29 +233,32 @@ class Logger : PsModuleBase, IDisposable {
     $o.Value.Logdirectory = $Logdirectory
     return $o.Value
   }
-  [bool] IsEnabled([LogEventType]$level) {
+  [bool] IsEnabled([LogLevel]$level) {
     return (!$this.IsDisposed) -and ($level -ge $this.MinLevel)
   }
   [IO.FileInfo[]] GetlogFiles() {
-    return $this.Logdirectory.EnumerateFiles()
+    return $this.Appenders.FilePath
   }
-  [void] Log([LogEventType]$severity, [string]$message) {
-    $this.Log($severity, $message, $null)
+  [void] DeleteLogFiles() {
+    $this.GetlogFiles().Delete()
   }
-  [void] Log([LogEventType]$severity, [string]$message, [Exception]$exception) {
-    if ($this.IsEnabled($severity)) {
-      $this.Log($this.CreateEntry($severity, $message, $exception))
-    } else {
-      Write-Debug "[Logger] [$severity] is disabled. Skipped log message : $message"
-    }
-  }
-  [void] Log([ILoggerEntry]$entry) {
+  [void] Log([LogEntry]$entry) {
     foreach ($appender in $this.Appenders) {
       try {
         $appender.Log($entry)
       } catch {
-        throw [RuntimeException]::new("Logger failed processing appender '$($appender.GetType().Name)'", $_.Exception)
+        throw $_.Exception
       }
+    }
+  }
+  [void] Log([LogLevel]$severity, [string]$message) {
+    $this.Log($severity, $message, $null)
+  }
+  [void] Log([LogLevel]$severity, [string]$message, [Exception]$exception) {
+    if ($this.IsEnabled($severity)) {
+      $this.Log($this.CreateEntry($severity, $message, $exception))
+    } else {
+      Write-Debug "[Logger] [$severity] is disabled. Skipped log message : $message"
     }
   }
   [void] AddLogAppender() {
@@ -267,38 +266,37 @@ class Logger : PsModuleBase, IDisposable {
   }
   [void] AddLogAppender([LogAppender]$LogAppender) {
     if ($null -ne $this.Appenders) {
-      $a = $LogAppender.type.ToString() + "Appender"
-      if ($this.Appenders.GetEnumerator().Where({ $_.PsObject.TypeNames[0] -eq $a }).count -gt 0) {
-        Write-Verbose "[$a] is already added"
+      if ($this.Appenders._name.Contains($LogAppender._name)) {
+        Write-Warning "$LogAppender is already added"
         return
       }
     }
     $this.Appenders += $LogAppender
   }
-  [ILoggerEntry] CreateEntry([LogEventType]$severity, [string]$message) {
+  [LogEntry] CreateEntry([LogLevel]$severity, [string]$message) {
     return $this.CreateEntry($severity, $message, $null)
   }
-  [ILoggerEntry] CreateEntry([LogEventType]$severity, [string]$message, [Exception]$exception) {
-    if ($null -ne ($this.EntryType | Get-Member -MemberType Method -Static -Name Create)) {
-      return $this.EntryType::Create($severity, $message, $exception)
+  [LogEntry] CreateEntry([LogLevel]$severity, [string]$message, [Exception]$exception) {
+    if ($null -ne ($this.LogBaseType | Get-Member -MemberType Method -Static -Name Create)) {
+      return $this.LogBaseType::Create($severity, $message, $exception)
     }
-    return $this.EntryType::New($severity, $message, $exception)
+    return $this.LogBaseType::New($severity, $message, $exception)
   }
   # --- Convenience Methods ---
-  [void] Info([string]$message) { $this.Log([LogEventType]::Info, $message) }
-  [void] Debug([string]$message) { $this.Log([LogEventType]::Debug, $message) }
+  [void] Info([string]$message) { $this.Log([LogLevel]::Info, $message) }
+  [void] Debug([string]$message) { $this.Log([LogLevel]::Debug, $message) }
 
-  [void] Warn([string]$message) { $this.Log([LogEventType]::Warning, $message) }
+  [void] Warn([string]$message) { $this.Log([LogLevel]::Warning, $message) }
 
   [void] Error([string]$message) { $this.Error($message, $null) }
-  [void] Error([string]$message, [Exception]$exception) { $this.Log([LogEventType]::Error, $message, $exception) }
+  [void] Error([string]$message, [Exception]$exception) { $this.Log([LogLevel]::Error, $message, $exception) }
 
   [void] Fatal([string]$message) { $this.Fatal($message, $null) }
-  [void] Fatal([string]$message, [Exception]$exception = $null) { $this.Log([LogEventType]::Fatal, $message, $exception) }
+  [void] Fatal([string]$message, [Exception]$exception = $null) { $this.Log([LogLevel]::Fatal, $message, $exception) }
 
   [string] ToString() {
     return @{
-      EntryType    = $this.EntryType
+      LogBaseType  = $this.LogBaseType
       MinLevel     = $this.MinLevel
       Logdirectory = $this.Logdirectory
       Appenders    = $this.Appenders ? ([IO.FileInfo[]]($this.Appenders.FilePath)).Name :@()
@@ -322,28 +320,27 @@ class Logger : PsModuleBase, IDisposable {
     }
     # Clear the list to prevent further use and release references
     $this.Appenders.Clear()
-    $this.PsObject.Properties.Add([psscriptproperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a read-only Property") }))
+    $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a read-only Property") }))
   }
 }
 
 # A logger that does nothing. Useful as a default or for disabling logging.
 class NullLogger : Logger {
-  [Type]$EntryType = [LoggerEntry]
-  [LogEventType]$MinLevel = [LogEventType]::Fatal + 1 # Set above highest level to disable all
+  [LogLevel]$MinLevel = [LogLevel]::Fatal + 1 # Set above highest level to disable all
   hidden static [NullLogger]$Instance = [NullLogger]::new()
   NullLogger() {}
-  [void] Log([LogEventType]$severity, [string]$message, [Exception]$exception = $null) { } # No-op
+  [void] Log([LogLevel]$severity, [string]$message, [Exception]$exception = $null) { } # No-op
   [void] Debug([string]$message) { }
   [void] Info([string]$message) { }
   [void] Warn([string]$message) { }
   [void] Error([string]$message, [Exception]$exception) { }
   [void] Fatal([string]$message, [Exception]$exception) { }
-  [bool] IsEnabled([LogEventType]$level) { return $false }
+  [bool] IsEnabled([LogLevel]$level) { return $false }
 }
 
 $typestoExport = @(
-  [Logger], [ILoggerEntry], [LogAppender], [LogEventType], [ConsoleAppender],
-  [JsonAppender], [LogAppenderType], [FileAppender], [NullLogger], [LoggerEntry]
+  [Logger], [LogEntry], [LogAppender], [LogLevel], [ConsoleAppender],
+  [JsonAppender], [XMLAppender], [LogAppenderType], [FileAppender], [NullLogger]
 )
 # Register Type Accelerators
 $TypeAcceleratorsClass = [PsObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')

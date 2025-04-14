@@ -3,18 +3,19 @@ function Write-LogEntry {
   .SYNOPSIS
     Writes a log message of a specified logger instance.
   .DESCRIPTION
-    Logs a message with a given severity level to all appenders configured
-    in the provided logger instance, provided the severity meets the logger's MinLevel.
+    Logs a message with a given severity level to all configured logappenders.
   .PARAMETER Logger
     The logger instance (created via New-Logger or directly) to use for logging.
   .PARAMETER Message
     The main text of the log message.
   .PARAMETER Severity
-    The severity level of the message. Must be one of the LogEventType enum values
+    The severity level of the message. Must be one of the LogLevel enum values
     (Debug, Info, Warn, Error, Fatal).
   .PARAMETER Exception
     [Optional] An Exception object associated with the log entry, typically used
     with Error or Fatal severity.
+  .NOTES
+    Will only work when the severity meets the logger's MinLevel.
   .EXAMPLE
     $logger = New-Logger
     try {
@@ -30,37 +31,45 @@ function Write-LogEntry {
   .LINK
     https://github.com/chadnpc/cliHelper.logger/blob/main/Public/Write-LogEntry.ps1
   #>
-  [CmdletBinding()]
+  [CmdletBinding(DefaultParameterSetName = 'm')]
   param(
     [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
     [Alias('l')][ValidateNotNull()]
     [Logger]$Logger,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $true, ParameterSetName = 'e')]
+    [Alias('entry')][ValidateNotNull()]
+    [LogEntry]$LogEntry,
+
+    [Parameter(Mandatory = $true, ParameterSetName = 'm')]
     [Alias('msg')]
     [string]$Message,
 
-    [Parameter(Mandatory = $false)]
+    [Parameter(Mandatory = $false, ParameterSetName = 'm')]
     [Alias('s', 'level')]
-    [LogEventType]$Severity = 1,
+    [LogLevel]$Severity = 1,
 
-    [Parameter(Mandatory = $false)]
+    [Parameter(Mandatory = $false, ParameterSetName = 'm')]
     [Alias('e')][AllowNull()]
     [System.Exception]$Exception # Optional Exception parameter
   )
 
   Process {
-    #HACK: For now, rely on the logger's internal checks or catch potential NullReferenceExceptions if methods fail.
     try {
-      switch ($Severity) {
-        "Debug" { $Logger.Debug($Message); break }
-        "Info" { $Logger.Info($Message); break }
-        "Warning" { $Logger.Warning($Message); break }
-        "Error" { $Logger.Error($Message, $Exception); break }
-        "Fatal" { $Logger.Fatal($Message, $Exception); break }
-        Default {
-          throw [System.Exception]::new("Unhandled LogEventType: $Severity")
+      if ($PSCmdlet.ParameterSetName -eq "m") {
+        #HACK: For now, rely on the logger's internal checks or catch potential NullReferenceExceptions if methods fail.
+        switch ($Severity) {
+          "Debug" { $Logger.Debug($Message); break }
+          "Info" { $Logger.Info($Message); break }
+          "Warning" { $Logger.Warning($Message); break }
+          "Error" { $Logger.Error($Message, $Exception); break }
+          "Fatal" { $Logger.Fatal($Message, $Exception); break }
+          Default {
+            throw [System.Exception]::new("Unhandled LogLevel: $Severity")
+          }
         }
+      } else {
+        $logger.Log($LogEntry)
       }
     } catch {
       $PSCmdlet.ThrowTerminatingError([System.Management.Automation.ErrorRecord]::new(

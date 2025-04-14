@@ -53,10 +53,10 @@ function New-Logger {
     [string]$FileName = "log_$(Get-Date -Format 'yyyyMMdd-HHmmss')-$(New-Guid).log",
 
     # Sets the minimum severity level for messages to be processed by the logger.
-    # Defaults to 'Info'. Valid values are from the LogEventType enum (Debug, Info, Warn, Error, Fatal).
+    # Defaults to 'Info'. Valid values are from the LogLevel enum (Debug, Info, Warn, Error, Fatal).
     [Parameter(Mandatory = $false)]
     [Alias('Level')]
-    [LogEventType]$MinLevel = 'Info',
+    [LogLevel]$MinLevel = 'Info',
 
     # has Console appender by default
     [LogAppender[]]$Appenders = @([ConsoleAppender]::new())

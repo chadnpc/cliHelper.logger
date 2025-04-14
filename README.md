@@ -25,7 +25,7 @@ Import-Module cliHelper.logger
 $logPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs");
 $logger = New-Logger -Logdir $logPath -Level Debug
 
-# It's critical to use try/finally to ensure Dispose() is called!
+# It's critical to use try/finally to ensure Dipose() is called.
 try {
   $logger | Add-JsonAppender
   $logger | Write-LogEntry -Level Info -Message "Application started in directory: $logPath"
@@ -83,7 +83,7 @@ $Logdir = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs")
 $ObjectLogger = [Logger]::new($Logdir) # Constructor ensures directory exists
 
 # Set minimum level
-$ObjectLogger.MinLevel = [LogEventType]::Debug
+$ObjectLogger.MinLevel = [LogLevel]::Debug
 
 # 2. Create and add appenders manually
 $console = [ConsoleAppender]::new()
@@ -123,14 +123,14 @@ You can create custom classes implementing `ILoggerEntry` if you need to add mor
 ```PowerShell
 # Define your custom class
 class CustomEntry : ILoggerEntry {
-  [LogEventType]$Severity
+  [LogLevel]$Severity
   [Exception]$Exception
   [datetime]$Timestamp = [datetime]::UtcNow
   [ValidateNotNullOrWhiteSpace()][string]$Message
   [string]$CorrelationId # Custom field
 
   # Factory method (required pattern)
-  static [CustomEntry] Create([LogEventType]$severity, [string]$message, [System.Exception]$exception) {
+  static [CustomEntry] Create([LogLevel]$severity, [string]$message, [System.Exception]$exception) {
     # You might generate or retrieve CorrelationId here
     $id = (Get-Random -Maximum 10000).ToString("D5")
     return [CustomEntry]@{
