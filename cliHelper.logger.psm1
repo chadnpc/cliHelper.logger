@@ -283,7 +283,7 @@ class Logger : PsModuleBase, IDisposable {
       Write-Debug "[Logger] [$severity] is disabled. Skipped log message : $message"
     }
   }
-  [LogAppender] GetAppender([LogAppenderType]$type) {
+  [LogAppender[]] GetAppenders([LogAppenderType]$type) {
     return $this._appenders.Where({ $_._type -eq $type })
   }
   [void] AddLogAppender() {
@@ -297,6 +297,9 @@ class Logger : PsModuleBase, IDisposable {
       }
     }
     $this._appenders += $LogAppender
+  }
+  [LogEntry[]] ReadJsonEntries() {
+    return $this.GetAppenders('JSON')[0].ReadAllEntries()
   }
   [LogEntry] CreateEntry([LogLevel]$severity, [string]$message) {
     return $this.CreateEntry($severity, $message, $null)
