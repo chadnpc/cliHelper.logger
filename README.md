@@ -20,13 +20,12 @@ This is the easiest way to get started with scripts or interactive sessions.
 # Import the module
 Import-Module cliHelper.logger
 
-# 1. Create a logger instance (defaults to Info level, Console and File appenders)
-#    Logs will go to .$env:TEMP by default. or specify a custom directory.
-$logPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs");
-$logger = New-Logger -Logdir $logPath -Level Debug
-
-# It's critical to use try/finally to ensure Dipose() is called.
 try {
+  # 1. Create a logger instance (defaults to Info level, Console and File appenders)
+  #    Logs will go to .$env:TEMP by default. or specify a custom directory.
+  $logPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs");
+  $logger = New-Logger -Logdir $logPath -Level Debug
+
   $logger | Add-JsonAppender
   $logger | Write-LogEntry -Level Info -Message "Application started in directory: $logPath"
   $logger | Write-LogEntry -Level Debug -Message "Configuration loaded."
@@ -46,15 +45,15 @@ try {
   Write-Host "Check logs in $logPath"
 } finally {
   # 2. IMPORTANT: Dispose the logger to flush buffers and release file handles
-  # $logger.Dispose()
+  $logger.Dispose()
 }
 ```
 
 ### Usage with Cmdlets
 
 ```PowerShell
-$logPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs");
 try {
+  $logPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs");
   $logger = New-Logger -Logdir $logPath
   # Add a JSON appender to the same logger
   $logger | Add-JsonAppender
