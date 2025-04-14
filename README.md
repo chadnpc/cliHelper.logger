@@ -77,35 +77,35 @@ Import-Module cliHelper.logger
 $Logdir = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs")
 
 # 1. Create logger instance directly
-$ObjectLogger = [Logger]::new($Logdir) # Constructor ensures directory exists
+$obj_lg = [Logger]::new($Logdir) # Constructor ensures directory exists
 
 # Set minimum level
-$ObjectLogger.MinLevel = [LogLevel]::Debug
+$obj_lg.MinLevel = [LogLevel]::Debug
 
 # 2. Create and add appenders manually
 $console = [ConsoleAppender]::new()
 $file = [FileAppender]::new((Join-Path $Logdir "mytool.log"))
 $json = [JsonAppender]::new((Join-Path $Logdir "mytool_metrics.json"))
 
-$ObjectLogger.AddLogAppender($console)
-$ObjectLogger.AddLogAppender($file)
-$ObjectLogger.AddLogAppender($json)
+$obj_lg.AddLogAppender($console)
+$obj_lg.AddLogAppender($file)
+$obj_lg.AddLogAppender($json)
 
 # 3. Use logger methods directly (within try/finally)
 try {
-  $ObjectLogger.Info("Object Logger Initialized. with $($ObjectLogger._appenders.Count) appenders.")
-  $ObjectLogger.Debug("Detailed trace message.")
+  $obj_lg.Info("Object Logger Initialized. with $($obj_lg._appenders.Count) appenders.")
+  $obj_lg.Debug("Detailed trace message.")
 
   # simulate a failure:
   try {
     throw [System.IO.FileNotFoundException]::new("Required config file missing", "config.xml")
   } catch {
-    $ObjectLogger.Fatal("Cannot start tool - configuration error.", $_)
+    $obj_lg.Fatal("Cannot start tool - configuration error.", $_)
   }
 } finally {
   # 4. IMPORTANT: Dispose the logger
-  if ($null -ne $ObjectLogger) {
-    $ObjectLogger.Dispose()
+  if ($null -ne $obj_lg) {
+    $obj_lg.Dispose()
     Write-Host "Object Logger Disposed."
   }
 }
