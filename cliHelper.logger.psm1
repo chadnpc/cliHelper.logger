@@ -53,8 +53,6 @@ class LogEntry {
 
 class LogAppender : IDisposable {
   hidden [ValidateNotNullOrWhiteSpace()][string]$_name = $this.PsObject.TypeNames[0]
-  hidden [ValidateNotNullOrEmpty()][LogAppenderType]$_type = "File"
-
   [void] Log([LogEntry]$entry) {
     [ValidateNotNull()][LogEntry]$entry = $entry
     throw [System.NotImplementedException]::new("Log method not implemented in $($this.GetType().Name)")
@@ -109,6 +107,7 @@ class FileAppender : LogAppender {
   hidden [StreamWriter]$_writer
   hidden [ValidateNotNullOrWhiteSpace()][string]$FilePath
   hidden [ReaderWriterLockSlim]$_lock = [ReaderWriterLockSlim]::new()
+  hidden [ValidateNotNullOrEmpty()][LogAppenderType]$_type = "File"
 
   FileAppender([string]$Path) {
     $this.FilePath = [Logger]::GetUnResolvedPath($Path)
@@ -177,6 +176,7 @@ class FileAppender : LogAppender {
 
 # Appender that writes log entries as JSON objects to a file
 class JsonAppender : FileAppender {
+  hidden [ValidateNotNullOrEmpty()][LogAppenderType]$_type = "JSON"
   JsonAppender([string]$Path) : base($Path) {}
   [void] Log([LogEntry]$entry) {
     if ($this.IsDisposed) { throw [System.InvalidOperationException]::new("$($this.GetType().Name) is already disposed") }
@@ -196,6 +196,7 @@ class JsonAppender : FileAppender {
 }
 
 class XMLAppender : FileAppender {
+  hidden [ValidateNotNullOrEmpty()][LogAppenderType]$_type = "XML"
   XMLAppender([string]$Path) : base($Path) {}
   [LogEntry[]] ReadAllEntries() {
     if ([IO.File]::Exists($this.FilePath)) {
@@ -208,7 +209,7 @@ class XMLAppender : FileAppender {
 class Logger : PsModuleBase, IDisposable {
   [LogLevel] $MinLevel = [LogLevel]::INFO
   hidden [IO.FileInfo[]] $_logFiles = @()
-  hidden [Type] $_logBaseType = [LogEntry]
+  hidden [Type] $_LogType = [LogEntry]
   hidden [Object] $_disposeLock = [Object]::new()
   hidden [ValidateNotNull()] $_logdirectory
   hidden [ValidateNotNull()] [LogAppender[]] $_appenders = @()
@@ -245,12 +246,12 @@ class Logger : PsModuleBase, IDisposable {
         }
       )
     )
-    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogBaseType', { return $this._logBaseType }, {
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogType', { return $this._LogType }, {
           param($value)
           if ($value -is [Type] -and $value.BaseType.Name -eq 'LogEntry') {
-            $this._logBaseType = $value
+            $this._LogType = $value
           } else {
-            throw [SetValueException]::new("LogBaseType must be a Type that implements LogEntry")
+            throw [SetValueException]::new("LogType must be a Type that implements LogEntry")
           }
         }
       )
@@ -283,8 +284,11 @@ class Logger : PsModuleBase, IDisposable {
       Write-Debug "[Logger] [$severity] is disabled. Skipped log message : $message"
     }
   }
-  [LogAppender[]] GetAppenders([LogAppenderType]$type) {
-    return $this._appenders.Where({ $_._type -eq $type })
+  [JsonAppender] GetJsonAppender() {
+    $ja = $this.GetAppenders("JSON")
+    if ($null -eq $ja) { return $null }
+    if ($ja.count -gt 1) { throw [InvalidOperationException]::new("Found more than one JSON appender!") }
+    return $ja[0]
   }
   [void] AddLogAppender() {
     $this.AddLogAppender([ConsoleAppender]::new())
@@ -299,16 +303,19 @@ class Logger : PsModuleBase, IDisposable {
     $this._appenders += $LogAppender
   }
   [LogEntry[]] ReadJsonEntries() {
-    return $this.GetAppenders('JSON')[0].ReadAllEntries()
+    return $this.GetJsonAppender().ReadAllEntries()
+  }
+  [LogAppender[]] GetAppenders([LogAppenderType]$type) {
+    return $this._appenders.Where({ $_._type -eq $type })
   }
   [LogEntry] CreateEntry([LogLevel]$severity, [string]$message) {
     return $this.CreateEntry($severity, $message, $null)
   }
   [LogEntry] CreateEntry([LogLevel]$severity, [string]$message, [Exception]$exception) {
-    if ($null -ne ($this.LogBaseType | Get-Member -MemberType Method -Static -Name Create)) {
-      return $this.LogBaseType::Create($severity, $message, $exception)
+    if ($null -ne ($this.LogType | Get-Member -MemberType Method -Static -Name Create)) {
+      return $this.LogType::Create($severity, $message, $exception)
     }
-    return $this.LogBaseType::New($severity, $message, $exception)
+    return $this.LogType::New($severity, $message, $exception)
   }
   # --- Convenience Methods ---
   [void] Info([string]$message) { $this.Log([LogLevel]::INFO, $message) }
@@ -324,7 +331,7 @@ class Logger : PsModuleBase, IDisposable {
 
   [string] ToString() {
     return @{
-      LogBaseType  = $this.LogBaseType
+      LogType      = $this.LogType
       MinLevel     = $this.MinLevel
       Logdirectory = $this.Logdirectory
       Appenders    = $this._appenders ? ([IO.FileInfo[]]($this._appenders.FilePath)).Name : @()
