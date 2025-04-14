@@ -206,6 +206,7 @@ class XMLAppender : FileAppender {
   }
 }
 
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidInvokingEmptyMembers', '')]
 class Logger : PsModuleBase, IDisposable {
   [LogLevel] $MinLevel = [LogLevel]::INFO
   hidden [IO.FileInfo[]] $_logFiles = @()
@@ -308,15 +309,12 @@ class Logger : PsModuleBase, IDisposable {
     }
     $this._appenders += $LogAppender
   }
-  [LogEntry[]] ReadJsonEntries() {
-    return $this.GetJsonAppender().ReadAllEntries()
-  }
   [LogAppender[]] GetAppenders([LogAppenderType]$type) {
     return $this.GetAppenders($type, -1)
   }
   [LogAppender[]] GetAppenders([LogAppenderType]$type, [int]$MinCount) {
     $a = $this._appenders.Where({ $_._type -eq $type })
-    if ($MinCount -gt 0 -and $a.count -gt $MinCount) { throw [InvalidOperationException]::new("Found more than one  $type appender!") }
+    if ($MinCount -ge 0 -and $a.count -gt $MinCount) { throw [InvalidOperationException]::new("Found more than one  $type appender!") }
     if ($null -eq $a) { return $null }
     return $a
   }
@@ -328,6 +326,17 @@ class Logger : PsModuleBase, IDisposable {
       return $this.LogType::Create($severity, $message, $exception)
     }
     return $this.LogType::New($severity, $message, $exception)
+  }
+  [LogEntry[]] ReadAllEntries([FileAppender]$appender) {
+    return $this.ReadAllEntries($appender._type)
+  }
+  [LogEntry[]] ReadAllEntries([LogAppenderType]$type) {
+    $a = $this."$('Get' + $Type + 'Appender')"()
+    if ($null -eq $a) { return @() }
+    return $a.ReadAllEntries()
+  }
+  [LogEntry[]] ReadJsonEntries() {
+    return $this.GetJsonAppender().ReadAllEntries()
   }
   # --- Convenience Methods ---
   [void] Info([string]$message) { $this.Log([LogLevel]::INFO, $message) }
