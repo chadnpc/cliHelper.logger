@@ -152,6 +152,9 @@ class FileAppender : LogAppender {
     }
   }
   [LogEntry[]] ReadAllEntries() {
+    return [FileAppender]::ReadAllEntries($this.FilePath)
+  }
+  static [LogEntry[]] ReadAllEntries([string]$FilePath) {
     # todo: add implementation to read a .log file
     return @()
   }
@@ -188,8 +191,11 @@ class JsonAppender : FileAppender {
     }
   }
   [LogEntry[]] ReadAllEntries() {
-    if ([IO.File]::Exists($this.FilePath)) {
-      return '[{0}]' -f ([IO.File]::ReadAllText($this.FilePath)) | ConvertFrom-Json
+    return [JsonAppender]::ReadAllEntries($this.FilePath)
+  }
+  static [LogEntry[]] ReadAllEntries([string]$FilePath) {
+    if ([IO.File]::Exists($FilePath)) {
+      return '[{0}]' -f ([IO.File]::ReadAllText($FilePath)) | ConvertFrom-Json
     }
     return @()
   }
@@ -199,8 +205,11 @@ class XMLAppender : FileAppender {
   hidden [ValidateNotNullOrEmpty()][LogAppenderType]$_type = "XML"
   XMLAppender([string]$Path) : base($Path) {}
   [LogEntry[]] ReadAllEntries() {
-    if ([IO.File]::Exists($this.FilePath)) {
-      return [IO.File]::ReadAllText($this.FilePath) | ConvertFrom-CliXml
+    return [XMLAppender]::ReadAllEntries($this.FilePath)
+  }
+  static [LogEntry[]] ReadAllEntries([string]$FilePath) {
+    if ([IO.File]::Exists($FilePath)) {
+      return [IO.File]::ReadAllText($FilePath) | ConvertFrom-CliXml
     }
     return @()
   }
@@ -240,8 +249,10 @@ class Logger : PsModuleBase, IDisposable {
       )
     )
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogFiles', {
-          if ($this._appenders) { $this._logFiles = $this._appenders.FilePath }
-          return $this._logFiles
+          if ($this._appenders.count -gt 0) {
+            $this._appenders.FilePath.Where({ $_ -notin $this._logFiles.FullName }).ForEach({ $this._logFiles += $_ })
+          }
+          return ($this._logFiles | Select-Object @{ l = "value"; e = { [IO.FileInfo]::new($_) } }).value
         }, {
           throw [SetValueException]::new("LogFiles is a read-only Property")
         }
@@ -329,15 +340,21 @@ class Logger : PsModuleBase, IDisposable {
   }
   [LogEntry[]] ReadAllEntries([LogAppenderType]$type) {
     $a = $this."$('Get' + $Type + 'Appender')"()
-    if ($null -eq $a) { return @() }
-    return $a.ReadAllEntries()
+    if ($null -ne $a) { return $a.ReadAllEntries() }
+    return $this."$('Read' + $Type + 'Entries')"()
   }
   [LogEntry[]] ReadAllEntries([FileAppender]$appender) {
     return $this.ReadAllEntries($appender._type)
   }
   [LogEntry[]] ReadJsonEntries() {
+    if ($this.IsDisposed -and $this.LogFiles.Count -gt 0) {
+      return $this.LogFiles.Where({ $_.Extension -eq ".json" }).ForEach({ $this.ReadJsonEntries($_) })
+    }
     $a = $this.GetJsonAppender()
-    return $a ? $a.ReadAllEntries() : @()
+    return $a ? [JsonAppender]::ReadAllEntries($a.FilePath) : @()
+  }
+  [LogEntry[]] ReadJsonEntries([IO.FileInfo]$files) {
+    return ($files | Select-Object @{l = 'entries'; e = { [JsonAppender]::ReadAllEntries($_) } }).entries
   }
   # --- Convenience Methods ---
   [void] Info([string]$message) { $this.Log([LogLevel]::INFO, $message) }
@@ -377,7 +394,7 @@ class Logger : PsModuleBase, IDisposable {
       }
     }
     # Clear the list to prevent further use and release references
-    $this._appenders.Clear()
+    $this._appenders.Clear();
     $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a read-only Property") }))
   }
 }
