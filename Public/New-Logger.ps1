@@ -56,7 +56,7 @@ function New-Logger {
     # Defaults to 'Info'. Valid values are from the LogLevel enum (Debug, Info, Warn, Error, Fatal).
     [Parameter(Mandatory = $false)]
     [Alias('Level')]
-    [LogLevel]$MinLevel = 'Info',
+    [LogLevel]$MinLevel = 'INFO',
 
     # has Console appender by default
     [LogAppender[]]$appenders = @([ConsoleAppender]::new())
