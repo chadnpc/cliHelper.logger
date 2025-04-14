@@ -61,7 +61,7 @@ function Write-LogEntry {
         switch ($Severity) {
           "DEBUG" { $Logger.Debug($Message); break }
           "INFO" { $Logger.Info($Message); break }
-          "WARN" { $Logger.Warning($Message); break }
+          "WARN" { $Logger.Warn($Message); break }
           "ERROR" { $Logger.Error($Message, $Exception); break }
           "FATAL" { $Logger.Fatal($Message, $Exception); break }
           Default {
