@@ -284,11 +284,17 @@ class Logger : PsModuleBase, IDisposable {
       Write-Debug "[Logger] [$severity] is disabled. Skipped log message : $message"
     }
   }
+  [FileAppender] GetFileAppender() {
+    return $this.GetAppenders('File', 1)[0]
+  }
+  [ConsoleAppender] GetConsoleAppender() {
+    return $this.GetAppenders('CONSOLE', 1)[0]
+  }
+  [XMLAppender] GetXMLAppender() {
+    return $this.GetAppenders("JSON", 1)[0]
+  }
   [JsonAppender] GetJsonAppender() {
-    $ja = $this.GetAppenders("JSON")
-    if ($null -eq $ja) { return $null }
-    if ($ja.count -gt 1) { throw [InvalidOperationException]::new("Found more than one JSON appender!") }
-    return $ja[0]
+    return $this.GetAppenders("JSON", 1)[0]
   }
   [void] AddLogAppender() {
     $this.AddLogAppender([ConsoleAppender]::new())
@@ -306,7 +312,13 @@ class Logger : PsModuleBase, IDisposable {
     return $this.GetJsonAppender().ReadAllEntries()
   }
   [LogAppender[]] GetAppenders([LogAppenderType]$type) {
-    return $this._appenders.Where({ $_._type -eq $type })
+    return $this.GetAppenders($type, -1)
+  }
+  [LogAppender[]] GetAppenders([LogAppenderType]$type, [int]$MinCount) {
+    $a = $this._appenders.Where({ $_._type -eq $type })
+    if ($MinCount -gt 0 -and $a.count -gt $MinCount) { throw [InvalidOperationException]::new("Found more than one  $type appender!") }
+    if ($null -eq $a) { return $null }
+    return $a
   }
   [LogEntry] CreateEntry([LogLevel]$severity, [string]$message) {
     return $this.CreateEntry($severity, $message, $null)
