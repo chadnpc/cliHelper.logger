@@ -258,6 +258,8 @@ class Logger : PsModuleBase, IDisposable {
         }
       )
     )
+    $o.Value.PsObject.Properties.Add([PSAliasProperty]::new('Files', 'LogFiles'))
+    $o.Value.PsObject.Properties.Add([PSAliasProperty]::new('Directory', 'Logdirectory'))
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogType', { return $this._LogType }, {
           param($value)
           if ($value -is [Type] -and $value.BaseType.Name -eq 'LogEntry') {
