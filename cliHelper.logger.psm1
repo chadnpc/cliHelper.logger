@@ -117,7 +117,7 @@ class FileAppender : LogAppender {
     $this._writer.AutoFlush = $true # Flush after every write
   }
   [void] Log([LogEntry]$entry) {
-    if ($this.IsDisposed) { return }
+    if ($this.IsDisposed) { throw [InvalidOperationException]::new("$($this.GetType().Name) is already disposed") }
     $logLine = $this.GetlogLine($entry)
     # Add exception info if present
     if ($null -ne $entry.Exception) {
@@ -129,8 +129,9 @@ class FileAppender : LogAppender {
     $this._lock.EnterWriteLock()
     try {
       # Re-check disposal after acquiring lock
-      if ($this.IsDisposed -or $null -eq $this._writer) { return }
-      $this._writer.WriteLine($logLine)
+      if ($null -ne $this._writer) {
+        $this._writer.WriteLine($logLine)
+      }
       # AutoFlush is true
     } catch {
       throw [RuntimeException]::new("FileAppender failed to write to '$($this.FilePath)'", $_.Exception)
@@ -266,6 +267,8 @@ class Logger : PsModuleBase, IDisposable {
     return (!$this.IsDisposed) -and ($level -ge $this.MinLevel)
   }
   [void] Log([LogEntry]$entry) {
+    if ($this.IsDisposed) { throw [InvalidOperationException]::new("$($this.GetType().Name) is already disposed") }
+    if ($this._appenders.Count -lt 1) { $this.AddLogAppender([ConsoleAppender]::new()) }
     foreach ($appender in $this._appenders) {
       try {
         $appender.Log($entry)
