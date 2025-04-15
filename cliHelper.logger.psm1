@@ -493,7 +493,7 @@ class NullLogger : Logger {
 
 $typestoExport = @(
   [Logger], [LogEntry], [LogAppender], [LogLevel], [ConsoleAppender], [Logsession],
-  [JsonAppender], [XMLAppender], [LogsessionFile], [LogsessionConfig], [LogAppenderType], [FileAppender], [NullLogger]
+  [JsonAppender], [XMLAppender], [LogsessionConfig], [LogAppenderType], [FileAppender], [NullLogger]
 )
 # Register Type Accelerators
 $TypeAcceleratorsClass = [PsObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')
