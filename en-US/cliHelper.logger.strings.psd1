@@ -18,7 +18,7 @@
 
 ### Log Types
 - [LogLevel] enum with 5 severity levels
-- [ILoggerEntry] interface for log entries
+- [LogEntry] interface for log entries
 - Built-in [LoggerEntry] implementation
 - Extensible entry type system
 
