@@ -92,12 +92,7 @@ class ConsoleAppender : LogAppender {
   [void] Log([LogEntry]$entry) {
     Write-Host $this.GetlogLine($entry) -f ([ConsoleAppender]::ColorMap[$entry.Severity.ToString()])
     if ($null -ne $entry.Exception) {
-      # Format exception concisely for console
-      $exceptionMessage = "  Exception: $($entry.Exception.GetType().Name): $($entry.Exception.Message)"
-      # Optionally include stack trace snippet if needed, but can be verbose
-      # $stack = ($entry.Exception.StackTrace -split '\r?\n' | Select-Object -First 3) -join "`n  "
-      # $exceptionMessage += "`n  Stack Trace (partial):`n  $stack"
-      Write-Error $exceptionMessage # Write-Error uses stderr and default error color
+      $(Get-Variable Host -ValueOnly).UI.WriteErrorLine("$($entry.Exception.GetType().Name)($($entry.Exception.Message))")
     }
   }
 }
@@ -253,8 +248,7 @@ class Logger : PsModuleBase, IDisposable {
         }
       )
     )
-    $o.Value.PsObject.Properties.Add([PSAliasProperty]::new('Files', 'LogFiles'))
-    $o.Value.PsObject.Properties.Add([PSAliasProperty]::new('Directory', 'Logdirectory'))
+    # $o.Value.PsObject.Properties.Add([PSAliasProperty]::new('Files', 'LogFiles'))
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogType', { return $this._LogType }, {
           param($value)
           if ($value -is [Type] -and $value.BaseType.Name -eq 'LogEntry') {
@@ -309,7 +303,7 @@ class Logger : PsModuleBase, IDisposable {
     $this.AddLogAppender([ConsoleAppender]::new())
   }
   [void] AddLogAppender([LogAppender]$LogAppender) {
-    if ($null -ne $this._appenders) {
+    if ($this._appenders.Count -gt 0) {
       if ($this._appenders._name.Contains($LogAppender._name)) {
         Write-Warning "$LogAppender is already added"
         return
