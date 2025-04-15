@@ -204,7 +204,7 @@ class XMLAppender : FileAppender {
 }
 
 class Logsession {
-  [type]$LogType
+  [string]$LogType
   [bool]$IsDisposed
   [string]$InstanceId
   [string[]]$LogFiles
@@ -226,6 +226,12 @@ class Logsession {
         $this.$_ = $o.$_
       }
     )
+  }
+  [string] GetLocation() {
+    return [IO.Path]::Combine([IO.Path]::GetTempPath(), "$($this.InstanceId).logger.json")
+  }
+  [string] ToString() {
+    return ConvertTo-Json($this)
   }
 }
 
