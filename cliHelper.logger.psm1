@@ -203,6 +203,43 @@ class XMLAppender : FileAppender {
   }
 }
 
+class LogsessionFile : System.MarshalByRefObject {
+  [string]$Name = [Guid]::NewGuid().Guid
+  [string]$Extension = ".json"
+  [string]$Suffix = "logger"
+  [bool]$IsReadOnly
+
+  LogsessionFile() {
+  }
+  LogsessionFile([string]$fileName) {
+  }
+  [void] Decrypt() {}
+  [void] Delete() {}
+  [void] Encrypt() {}
+  [FileStream] Create() {
+    return [IO.File]::Create($this.FullName)
+  }
+  [FileInfo] CopyTo([string]$destFileName) {
+    return $this.CopyTo($destFileName, $false)
+  }
+  [FileInfo] CopyTo([string]$destFileName, [bool]$overwrite) {
+    [void][IO.File]::Copy($this.FullName, $destFileName, $overwrite)
+    return [IO.FileInfo]::new($destFileName)
+  }
+  [FileInfo] MoveTo([string]$destFileName) {
+    return $this.MoveTo($destFileName, $false)
+  }
+  [FileInfo] MoveTo([string]$destFileName, [bool]$overwrite) {
+    [void][IO.File]::Move($this.FullName, $destFileName)
+    return [IO.FileInfo]::new($destFileName)
+  }
+}
+
+class LogsessionConfig {
+  [ValidateNotNullOrWhiteSpace()][string]$TMP = [IO.Path]::GetTempPath()
+  [LogsessionFile]$File = @{}
+}
+
 class Logsession {
   [string]$LogType
   [bool]$IsDisposed
@@ -211,6 +248,7 @@ class Logsession {
   [string]$Logdirectory
   [LogLevel]$MinLevel = 'INFO'
   [LogAppender[]]$Appenders
+  static [LogsessionConfig]$Config = @{}
   Logsession() {}
   Logsession([string]$InstanceId) {
     $this.InstanceId = $InstanceId
@@ -228,7 +266,8 @@ class Logsession {
     )
   }
   [string] GetLocation() {
-    return [IO.Path]::Combine([IO.Path]::GetTempPath(), "$($this.InstanceId).logger.json")
+    $c = [Logsession]::Config
+    return [IO.Path]::Combine($c.TMP, ("{0}.{1}{2}" -f $this.InstanceId, $c.File.Suffix, $c.File.Extension))
   }
   [string] ToString() {
     return ConvertTo-Json($this)
@@ -245,7 +284,7 @@ class Logger : PsModuleBase, IDisposable {
   hidden [ValidateNotNull()] [LogAppender[]] $_appenders = @()
   Logger() {
     [void][Logger]::From(
-      [IO.Path]::Combine([IO.Path]::GetTempPath(), [guid]::newguid().guid, 'Logs'),
+      [IO.Path]::Combine([Logsession]::Config.TMP, [guid]::newguid().guid, 'Logs'),
       [ref]$this
     )
   }
@@ -258,7 +297,7 @@ class Logger : PsModuleBase, IDisposable {
           $Ld = [Logger]::GetUnResolvedPath($value)
           if (![IO.Directory]::Exists($Ld)) {
             try {
-              PsModuleBase\New-Directory $Ld
+              [void][Logger]::CreateFolder($Ld)
               Write-Debug "[Logger] Created new Logdirectory: '$Ld'."
             } catch {
               throw [SetValueException]::new(($_.Exception | Format-List * -Force | Out-String))
@@ -296,7 +335,7 @@ class Logger : PsModuleBase, IDisposable {
       )
     )
     $o.Value.Logdirectory = $Logdirectory
-    $o.Value.ToString() | Out-File([IO.FileInfo]::new([IO.Path]::Combine([IO.Path]::GetTempPath(), "$($o.Value.InstanceId).logger.json")))
+    $o.Value.ToString() | Out-File([IO.FileInfo]::new([IO.Path]::Combine([Logsession]::Config.TMP, "$($o.Value.InstanceId).logger.json")))
     return $o.Value
   }
   [FileAppender[]] GetFileAppenders() {
@@ -325,7 +364,7 @@ class Logger : PsModuleBase, IDisposable {
     $this.Log($this.CreateEntry($severity, $message, $exception))
   }
   static [Logsession[]] Getallsessions() {
-    $f = [IO.DirectoryInfo]::new([IO.Path]::GetTempPath()).GetFiles("*.logger.json")
+    $f = [IO.DirectoryInfo]::new([Logsession]::Config.TMP).GetFiles("*.logger.json")
     $i = @(); if ($f.Count -gt 0) {
       $f.ForEach({ $i += ConvertFrom-Json([IO.File]::ReadAllText($_)) })
     }
@@ -453,8 +492,8 @@ class NullLogger : Logger {
 }
 
 $typestoExport = @(
-  [Logger], [LogEntry], [LogAppender], [LogLevel], [ConsoleAppender],
-  [JsonAppender], [XMLAppender], [Logsession], [LogAppenderType], [FileAppender], [NullLogger]
+  [Logger], [LogEntry], [LogAppender], [LogLevel], [ConsoleAppender], [Logsession],
+  [JsonAppender], [XMLAppender], [LogsessionFile], [LogsessionConfig], [LogAppenderType], [FileAppender], [NullLogger]
 )
 # Register Type Accelerators
 $TypeAcceleratorsClass = [PsObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')
