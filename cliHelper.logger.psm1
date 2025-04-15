@@ -203,9 +203,35 @@ class XMLAppender : FileAppender {
   }
 }
 
+class Logsession {
+  [type]$LogType
+  [bool]$IsDisposed
+  [string]$InstanceId
+  [string[]]$LogFiles
+  [string]$Logdirectory
+  [LogLevel]$MinLevel = 'INFO'
+  [LogAppender[]]$Appenders
+  Logsession() {}
+  Logsession([string]$InstanceId) {
+    $this.InstanceId = $InstanceId
+  }
+  Logsession([Logger]$ob) {
+    $($this.PsObject.Properties.Name |
+        Select-Object -Exclude Appenders
+    ).ForEach({ $this.$_ = $ob.$_ })
+    $this.Appenders = $ob._appenders ? ([string[]]($ob._appenders._type)) : @()
+  }
+  Logsession([psobject]$o) {
+    $this.PsObject.Properties.Name.ForEach({
+        $this.$_ = $o.$_
+      }
+    )
+  }
+}
+
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidInvokingEmptyMembers', '')]
 class Logger : PsModuleBase, IDisposable {
-  [LogLevel] $MinLevel = [LogLevel]::INFO
+  [LogLevel]$MinLevel = 'INFO'
   hidden [IO.FileInfo[]] $_logFiles = @()
   hidden [Type] $_LogType = [LogEntry]
   hidden [Object] $_disposeLock = [Object]::new()
@@ -257,7 +283,14 @@ class Logger : PsModuleBase, IDisposable {
         }
       )
     )
+    $Id = [String]::Join([char]45, (Get-Variable Host).Value.InstanceId.Guid, (Get-Variable PID).Value, $o.Value.GetHashCode())
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('InstanceId', [scriptblock]::Create("return '$Id'"), {
+          throw [SetValueException]::new("InstanceId is a read-only Property")
+        }
+      )
+    )
     $o.Value.Logdirectory = $Logdirectory
+    $o.Value.ToString() | Out-File([IO.FileInfo]::new([IO.Path]::Combine([IO.Path]::GetTempPath(), "$($o.Value.InstanceId).logger.json")))
     return $o.Value
   }
   [FileAppender[]] GetFileAppenders() {
@@ -284,6 +317,13 @@ class Logger : PsModuleBase, IDisposable {
       return
     }
     $this.Log($this.CreateEntry($severity, $message, $exception))
+  }
+  static [Logsession[]] Getallsessions() {
+    $f = [IO.DirectoryInfo]::new([IO.Path]::GetTempPath()).GetFiles("*.logger.json")
+    $i = @(); if ($f.Count -gt 0) {
+      $f.ForEach({ $i += ConvertFrom-Json([IO.File]::ReadAllText($_)) })
+    }
+    return $i
   }
   [FileAppender] GetFileAppender() {
     return $this.GetAppenders('File', 1)[0]
@@ -345,32 +385,12 @@ class Logger : PsModuleBase, IDisposable {
   [LogEntry[]] ReadJsonEntries([IO.FileInfo]$files) {
     return ($files | Select-Object @{l = 'entries'; e = { [JsonAppender]::ReadAllEntries($_) } }).entries
   }
-  [bool] IsEnabled([LogLevel]$level) {
-    return $level -ge $this.MinLevel
-  }
-  # --- Convenience Methods ---
-  [void] Info([string]$message) { $this.Log([LogLevel]::INFO, $message) }
-  [void] Debug([string]$message) { $this.Log([LogLevel]::DEBUG, $message) }
-
-  [void] Warn([string]$message) { $this.Log([LogLevel]::WARN, $message) }
-
-  [void] Error([string]$message) { $this.Error($message, $null) }
-  [void] Error([string]$message, [Exception]$exception) { $this.Log([LogLevel]::ERROR, $message, $exception) }
-
-  [void] Fatal([string]$message) { $this.Fatal($message, $null) }
-  [void] Fatal([string]$message, [Exception]$exception = $null) { $this.Log([LogLevel]::FATAL, $message, $exception) }
-
-  [string] ToString() {
-    return @{
-      LogType      = $this.LogType
-      MinLevel     = $this.MinLevel
-      Logdirectory = $this.Logdirectory
-      Appenders    = $this._appenders ? ([IO.FileInfo[]]($this._appenders.FilePath)).Name : @()
-    } | ConvertTo-Json
-  }
   [void] ClearLogdirectory() {
     $files = $this.Logdirectory.EnumerateFiles()
     $files ? $files.ForEach({ Remove-Item $_.FullName -Force }) : $null
+  }
+  [bool] IsEnabled([LogLevel]$level) {
+    return $level -ge $this.MinLevel
   }
   [void] Dispose() {
     if ($this.IsDisposed) { return }
@@ -386,6 +406,29 @@ class Logger : PsModuleBase, IDisposable {
       }
     }
     $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a read-only Property") }))
+  }
+  # --- Convenience Methods ---
+  [void] Info([string]$message) { $this.Log([LogLevel]::INFO, $message) }
+  [void] Debug([string]$message) { $this.Log([LogLevel]::DEBUG, $message) }
+
+  [void] Warn([string]$message) { $this.Log([LogLevel]::WARN, $message) }
+
+  [void] Error([string]$message) { $this.Error($message, $null) }
+  [void] Error([string]$message, [Exception]$exception) { $this.Log([LogLevel]::ERROR, $message, $exception) }
+
+  [void] Fatal([string]$message) { $this.Fatal($message, $null) }
+  [void] Fatal([string]$message, [Exception]$exception = $null) { $this.Log([LogLevel]::FATAL, $message, $exception) }
+
+  [string] ToString() {
+    return @{
+      InstanceId   = $this.InstanceId
+      IsDisposed   = [bool]$this.IsDisposed
+      LogType      = [string]$this.LogType
+      MinLevel     = [string]$this.MinLevel
+      LogFiles     = [string[]]$this.LogFiles
+      Logdirectory = [string]$this.Logdirectory
+      Appenders    = $this._appenders ? ([string[]]($this._appenders._type)) : @()
+    } | ConvertTo-Json
   }
 }
 
@@ -405,7 +448,7 @@ class NullLogger : Logger {
 
 $typestoExport = @(
   [Logger], [LogEntry], [LogAppender], [LogLevel], [ConsoleAppender],
-  [JsonAppender], [XMLAppender], [LogAppenderType], [FileAppender], [NullLogger]
+  [JsonAppender], [XMLAppender], [Logsession], [LogAppenderType], [FileAppender], [NullLogger]
 )
 # Register Type Accelerators
 $TypeAcceleratorsClass = [PsObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')
