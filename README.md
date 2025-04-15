@@ -88,45 +88,47 @@ try {
   # simulate a failure:
   throw [System.IO.FileNotFoundException]::new("Required config file missing", "config.xml")
 } catch {
-  $logger.Fatal(("{0}`n   {1}" -f $_.FullyQualifiedErrorId, $_.ScriptStackTrace), $_.Exception)
+  $logger.Fatal(("{0} :`n  {1}" -f $_.FullyQualifiedErrorId, $_.ScriptStackTrace), $_.Exception)
 } finally {
+  $logger.Info("Check logs in '$Logdir/mytool.log' and '$Logdir/mytool_metrics.json'")
   $logger.Dispose()
-  Write-Host "Check logs in $Logdir (mytool.log and mytool_metrics.json)"
 }
 ```
 
 ### Usage in your Custom classes (advanced). [you are on your own!]
 
-You can create custom classes implementing `ILoggerEntry` if you need to add more structured data to your logs (though custom appenders would be needed to fully utilize the extra data).
+You can create custom classes implementing `LogEntry` if you need to add more structured data to your logs (though custom appenders would be needed to fully utilize the extra data).
 
 ```PowerShell
 # Define your custom class
-class CustomEntry : ILoggerEntry {
+class CustomEntry : LogEntry {
   [LogLevel]$Severity
   [Exception]$Exception
   [datetime]$Timestamp = [datetime]::UtcNow
   [ValidateNotNullOrWhiteSpace()][string]$Message
   [string]$CorrelationId # Custom field
 
-  # Factory method (required pattern)
+  # Factory methods (required pattern)
+  static [CustomEntry] Create([LogLevel]$severity, [string]$message) {
+    return [CustomEntry]::Create($severity, $message, $null)
+  }
   static [CustomEntry] Create([LogLevel]$severity, [string]$message, [System.Exception]$exception) {
-    # You might generate or retrieve CorrelationId here
-    $id = (Get-Random -Maximum 10000).ToString("D5")
+    # Example: generate or retrieve CorrelationId
+    $Id = (Get-Random -Maximum 10000).ToString("D5")
     return [CustomEntry]@{
       Severity      = $severity
       Message       = $message
       Exception     = $exception
-      CorrelationId = $id
+      CorrelationId = $Id
     }
   }
 }
 
 # Create a logger with the custom entry type
-$customLogger = [Logger]::new()
-$customLogger.EntryType = [CustomEntry]
-$customLogger._appenders += [ConsoleAppender]::new() # ie: log will passthru the console by default.
-
 try {
+  $customLogger = [Logger]::new()
+  $customLogger.LogType = [CustomEntry]
+  $customLogger.AddLogAppender([ConsoleAppender]::new()) # ie: log will passthru the console by default.
   # When logging, the custom Create factory method is called
   $customLogger.Info("Logging event with custom entry type.")
 } finally {
@@ -138,28 +140,8 @@ Read the docs for more information on the [concepts](docs/Readme.md) used.
 
 #### NOTES:
 
-1. Remeber to **Dispose** the object
+1. **Remeber to **dispose** the object ex: in the `try...finally` block.**
 
-    **Always use a `try...finally` block:**
-
-    ```PowerShell
-    $logger = New-Logger # Or [Logger]::new()
-
-    try {
-      # ... Your code that uses the logger ...
-      $logger.Info("Doing work...")
-      throw [Exception]::new('Simulated exception')
-    } catch {
-      # Optional: Log exceptions from your main code block
-      $logger.Error("An error occurred in the main block.", $_.Exception)
-      # Re-throw if needed: throw
-    } finally {
-      # This block ALWAYS executes, even if errors occur
-      if ($null -ne $logger) {
-        $logger.Dispose()
-      }
-    }
-    ```
     Failure to call `$logger.Dispose()` can lead to:
       *   Log messages not being written to files (still stuck in buffers).
       *   File locks being held, preventing other processes (or even later runs of your script) from accessing the log files.
