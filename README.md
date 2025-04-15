@@ -128,9 +128,8 @@ class CustomEntry : LogEntry {
 try {
   $customLogger = [Logger]::new()
   $customLogger.LogType = [CustomEntry]
-  $customLogger.AddLogAppender([ConsoleAppender]::new()) # ie: log will passthru the console by default.
-  # When logging, the custom Create factory method is called
   $customLogger.Info("Logging event with custom entry type.")
+  $customLogger.Info("By default, If no LogAppender is added, Logs will passthru the console (like this).")
 } finally {
   $customLogger.Dispose()
 }
