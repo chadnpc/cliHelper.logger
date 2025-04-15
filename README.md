@@ -73,41 +73,26 @@ For more control or when building your own modules/tools, you can use the classe
 # Import the module to make classes available
 Import-Module cliHelper.logger
 
-# Define log directory
-$Logdir = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs")
-
-# 1. Create logger instance directly
-$obj_lg = [Logger]::new($Logdir) # Constructor ensures directory exists
-
-# Set minimum level
-$obj_lg.MinLevel = [LogLevel]::Debug
-
-# 2. Create and add appenders manually
-
-$obj_lg.AddLogAppender([ConsoleAppender]::new())
-$obj_lg.AddLogAppender([FileAppender]::new((Join-Path $Logdir "mytool.log")))
-$obj_lg.AddLogAppender([JsonAppender]::new((Join-Path $Logdir "mytool_metrics.json")))
-
-# 3. Use logger methods directly (within try/finally)
 try {
-  $obj_lg.Info("Object Logger Initialized. with $($obj_lg._appenders.Count) appenders.")
-  $obj_lg.Debug("Detailed trace message.")
+  $Logdir = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs")
+  $logger = [Logger]::new($Logdir) # Constructor ensures directory exists
+  $logger.MinLevel = [LogLevel]::Debug
 
+  # 2. Create and add appenders manually
+  $logger.AddLogAppender([ConsoleAppender]::new())
+  $logger.AddLogAppender([FileAppender]::new((Join-Path $Logdir "mytool.log")))
+  $logger.AddLogAppender([JsonAppender]::new((Join-Path $Logdir "mytool_metrics.json")))
+
+  $logger.Info("Object Logger Initialized. with $($logger._appenders.Count) appenders.")
+  $logger.Debug("Detailed trace message.")
   # simulate a failure:
-  try {
-    throw [System.IO.FileNotFoundException]::new("Required config file missing", "config.xml")
-  } catch {
-    $obj_lg.Fatal("Cannot start tool - configuration error.", $_)
-  }
+  throw [System.IO.FileNotFoundException]::new("Required config file missing", "config.xml")
+} catch {
+  $logger.Fatal(("{0}`n   {1}" -f $_.FullyQualifiedErrorId, $_.ScriptStackTrace), $_.Exception)
 } finally {
-  # 4. IMPORTANT: Dispose the logger
-  if ($null -ne $obj_lg) {
-    $obj_lg.Dispose()
-    Write-Host "Object Logger Disposed."
-  }
+  $logger.Dispose()
+  Write-Host "Check logs in $Logdir (mytool.log and mytool_metrics.json)"
 }
-
-Write-Host "Check logs in $Logdir (mytool.log and mytool_metrics.json)"
 ```
 
 ### Usage in your Custom classes (advanced). [you are on your own!]
