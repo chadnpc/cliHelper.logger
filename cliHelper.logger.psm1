@@ -263,9 +263,6 @@ class Logger : PsModuleBase, IDisposable {
   [FileAppender[]] GetFileAppenders() {
     return $this._appenders.Where({ $_.PsObject.TypeNames.Contains("FileAppender") })
   }
-  [bool] IsEnabled([LogLevel]$level) {
-    return (!$this.IsDisposed) -and ($level -ge $this.MinLevel)
-  }
   [void] Log([LogEntry]$entry) {
     if ($this.IsDisposed) { throw [InvalidOperationException]::new("$($this.GetType().Name) is already disposed") }
     if ($this._appenders.Count -lt 1) { $this.AddLogAppender([ConsoleAppender]::new()) }
@@ -281,11 +278,12 @@ class Logger : PsModuleBase, IDisposable {
     $this.Log($severity, $message, $null)
   }
   [void] Log([LogLevel]$severity, [string]$message, [Exception]$exception) {
-    if ($this.IsEnabled($severity)) {
-      $this.Log($this.CreateEntry($severity, $message, $exception))
-    } else {
-      Write-Debug "[Logger] [$severity] is disabled. Skipped log message : $message"
+    if ($this.IsDisposed) { throw [InvalidOperationException]::new("$($this.GetType().Name) is already disposed") }
+    if (!$this.IsEnabled($severity)) {
+      Write-Debug "[Logger] "$severity" loglevel is disabled. Skipped log message : $message"
+      return
     }
+    $this.Log($this.CreateEntry($severity, $message, $exception))
   }
   [FileAppender] GetFileAppender() {
     return $this.GetAppenders('File', 1)[0]
@@ -346,6 +344,9 @@ class Logger : PsModuleBase, IDisposable {
   }
   [LogEntry[]] ReadJsonEntries([IO.FileInfo]$files) {
     return ($files | Select-Object @{l = 'entries'; e = { [JsonAppender]::ReadAllEntries($_) } }).entries
+  }
+  [bool] IsEnabled([LogLevel]$level) {
+    return $level -ge $this.MinLevel
   }
   # --- Convenience Methods ---
   [void] Info([string]$message) { $this.Log([LogLevel]::INFO, $message) }
