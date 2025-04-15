@@ -97,7 +97,7 @@ try {
 
 ### Usage in your Custom classes (advanced). [you are on your own!]
 
-You can create custom classes implementing `LogEntry` if you need to add more structured data to your logs (though custom appenders would be needed to fully utilize the extra data).
+You can create custom classes inheriting `LogEntry` if you need to add more structured data to your logs (though custom appenders would be needed to fully utilize the extra data).
 
 ```PowerShell
 # Define your custom class
@@ -126,13 +126,14 @@ class CustomEntry : LogEntry {
 
 # Create a logger with the custom entry type
 try {
-  $customLogger = [Logger]::new()
-  $customLogger.LogType = [CustomEntry]
-  $customLogger.Info("Logging event with custom entry type.")
-  $customLogger.Info("By default, If no LogAppender is added, Logs will passthru the console (like this).")
+  $logger = [Logger]::new()
+  $logger.LogType = [CustomEntry]
+  $logger.Info("Logging event with custom entry type.")
+  $logger.Info("By default, If no LogAppender is added, Logs will passthru the console (like this).")
 } finally {
-  $customLogger.Dispose()
+  $logger.Dispose()
 }
+$logger.Info("more info") # will throw an error, since its disposed.
 ```
 
 Read the docs for more information on the [concepts](docs/Readme.md) used.
