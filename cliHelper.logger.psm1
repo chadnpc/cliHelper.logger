@@ -91,9 +91,6 @@ class ConsoleAppender : LogAppender {
   }
   [void] Log([LogEntry]$entry) {
     Write-Host $this.GetlogLine($entry) -f ([ConsoleAppender]::ColorMap[$entry.Severity.ToString()])
-    if ($null -ne $entry.Exception) {
-      $(Get-Variable Host -ValueOnly).UI.WriteErrorLine("$($entry.Exception.GetType().Name)($($entry.Exception.Message))")
-    }
   }
 }
 
@@ -384,8 +381,6 @@ class Logger : PsModuleBase, IDisposable {
         }
       }
     }
-    # Clear the list to prevent further use and release references
-    $this._appenders.Clear();
     $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a read-only Property") }))
   }
 }
