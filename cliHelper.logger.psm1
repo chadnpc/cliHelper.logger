@@ -78,7 +78,7 @@ class LogsessionFile : MarshalByRefObject {
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LastWriteTime', { return [IO.File]::GetLastWriteTime($this.FullName) }))
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('CreationTime', { return [IO.File]::GetCreationTime($this.FullName) }))
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Extension', { return [IO.Path]::GetExtension($this.FullName) }, {
-          param([string]$value)
+          Param([string]$value)
           $e = $value.StartsWith(".") ? $value : ".$value"; $nn = '{0}{1}' -f $this.BaseName, $e
           [void](Rename-Item -Path $this.FullName -NewName $nn -Force -Verbose:$false)
         }
@@ -86,12 +86,12 @@ class LogsessionFile : MarshalByRefObject {
     )
     return $o.Value
   }
-  [void] Decrypt() {}
-  [void] Delete() {}
-  [void] Encrypt() {}
+  [void] Decrypt() { [IO.File]::Decrypt($this.FullName) }
+  [void] Delete() { [IO.File]::Delete($this.FullName) }
+  [void] Encrypt() { [IO.File]::Encrypt($this.FullName) }
   # [void] SetSuffix() {}
   [FileStream] Create() {
-    return [IO.File]::Create($this.FullName)
+    return $this.Exists ? ([IO.File]::OpenRead($this.FullName)) : ([IO.File]::Create($this.FullName))
   }
   [FileInfo] CopyTo([string]$destFileName) {
     return $this.CopyTo($destFileName, $false)
