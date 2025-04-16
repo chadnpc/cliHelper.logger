@@ -52,9 +52,10 @@ class LogEntry {
 }
 
 class LogsessionFile : ConfigFile {
-  hidden [ValidateNotNullOrWhiteSpace()][string]$_suffix = "-logger"
-  # LogsessionFile() {}
-  # LogsessionFile([string]$fileName) {}
+  static hidden [ValidateNotNullOrWhiteSpace()][string]$_suffix = "-logger"
+  LogsessionFile() {}
+  LogsessionFile([PSCustomObject]$object) : base($object) {}
+  LogsessionFile([string]$fileName) : base($fileName) {}
 }
 
 class LogsessionConfig {
@@ -213,7 +214,6 @@ class XMLAppender : FileAppender {
     return @()
   }
 }
-
 class Logsession {
   [string]$LogType
   [bool]$IsDisposed
@@ -266,6 +266,7 @@ class Logger : PsModuleBase, IDisposable {
     [void][Logger]::From($Logdirectory, [ref]$this)
   }
   static hidden [Logger] From([string]$Logdirectory, [ref]$o) {
+    if ($null -eq $o) { throw [ArgumentException]::new("reference is null") };
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Logdirectory', [scriptblock]::Create("return [IO.DirectoryInfo]`$this._logdirectory.ToString()"), {
           param($value)
           $Ld = [Logger]::GetUnResolvedPath($value)
