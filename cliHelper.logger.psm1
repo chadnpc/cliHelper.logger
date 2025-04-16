@@ -52,12 +52,13 @@ class LogEntry {
 }
 
 class LogsessionFile : MarshalByRefObject {
+  hidden [ValidateNotNullOrWhiteSpace()][string]$_suffix
   LogsessionFile() {
     [void][LogsessionFile]::From("", [ref]$this)
   }
   LogsessionFile([string]$fileName) {
     if ([string]::IsNullOrWhiteSpace($fileName)) {
-      throw [ArgumentException]::new("PLease provide a valid fileName")
+      throw [ArgumentException]::new("Please provide a valid fileName")
     }
     [void][LogsessionFile]::From($fileName, [ref]$this)
   }
@@ -65,28 +66,24 @@ class LogsessionFile : MarshalByRefObject {
     return [LogsessionFile]::new($fileName)
   }
   static hidden [LogsessionFile] From([string]$fileName, [ref]$o) {
-    $n = [string]::IsNullOrWhiteSpace($fileName) ? "$([Guid]::NewGuid().Guid)-logger.json" : $fileName
-    $f = [string][Logger]::GetUnResolvedPath($n)
+    $n = [string]::IsNullOrWhiteSpace($fileName) ? "$([Guid]::NewGuid().Guid)-logger" : $fileName
+    $n = $n.EndsWith(".json") ? $n : "$n.json"; $f = [string][Logger]::GetUnResolvedPath($n)
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('FullName', [scriptblock]::Create("return '$f'")))
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Exists', { return [IO.File]::Exists($this.FullName) }))
-    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Name', { return [IO.Path]::GetFileName($this.FullName) }))
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Name', { return [IO.Path]::GetFileName($this.FullName) }, { Param([string]$value) [ValidateNotNullOrWhiteSpace()][string]$value = $value; $this.Rename(([string]::IsNullOrWhiteSpace([IO.Path]::GetExtension($value)) ? "$value.json" : $value)) }))
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Suffix', { return $this._suffix }, { Param([string]$value) $this._suffix = $value; $this.Name = $this.BaseName.Replace($this.Suffix, '') + $value + $this.Extension }))
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('BaseName', { return [IO.Path]::GetFileNameWithoutExtension($this.FullName) }))
-    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Attributes', { return [IO.File]::GetAttributes($this.FullName) }))
-    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LastWriteTime', { return [IO.File]::GetLastWriteTime($this.FullName) }))
-    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('CreationTime', { return [IO.File]::GetCreationTime($this.FullName) }))
-    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Extension', { return [IO.Path]::GetExtension($this.FullName) }, {
-          Param([string]$value)
-          $e = $value.StartsWith(".") ? $value : ".$value"; $nn = '{0}{1}' -f $this.BaseName, $e
-          [void](Rename-Item -Path $this.FullName -NewName $nn -Force -Verbose:$false)
-        }
-      )
-    )
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Extension', { return [IO.Path]::GetExtension($this.FullName) }, { Param([string]$value) [ValidateNotNullOrWhiteSpace()][string]$value = $value; $e = $value.StartsWith(".") ? $value : ".$value"; $this.Rename(('{0}{1}' -f $this.BaseName, $e)) }))
     return $o.Value
   }
-  [void] Decrypt() { [IO.File]::Decrypt($this.FullName) }
   [void] Delete() { [IO.File]::Delete($this.FullName) }
+  [void] Decrypt() { [IO.File]::Decrypt($this.FullName) }
   [void] Encrypt() { [IO.File]::Encrypt($this.FullName) }
-  # [void] SetSuffix() {}
+  [void] Rename([string]$nn) {
+    [ValidateNotNullOrWhiteSpace()][string]$nn = $nn;
+    $nf = ''; [ValidateNotNullOrWhiteSpace()][string]$nf = Rename-Item -Path $this.FullName -NewName $nn -Force -Verbose:$false -PassThru
+    $this.PsObject.Properties.Add([PSScriptProperty]::new('FullName', [scriptblock]::Create("return '$nf'")))
+  }
   [FileStream] Create() {
     return $this.Exists ? ([IO.File]::OpenRead($this.FullName)) : ([IO.File]::Create($this.FullName))
   }
