@@ -61,9 +61,6 @@ class LogsessionFile : MarshalByRefObject {
     }
     [void][LogsessionFile]::From($fileName, [ref]$this)
   }
-  static [LogsessionFile] Create() {
-    return [LogsessionFile]::From("", [ref][LogsessionFile]::new())
-  }
   static [LogsessionFile] Create([string]$fileName) {
     return [LogsessionFile]::new($fileName)
   }
