@@ -51,6 +51,43 @@ class LogEntry {
   }
 }
 
+class LogsessionFile : MarshalByRefObject {
+  [string]$Name = [Guid]::NewGuid().Guid
+  [string]$Extension = ".json"
+  [string]$Suffix = "logger"
+  [bool]$IsReadOnly
+
+  LogsessionFile() {
+  }
+  LogsessionFile([string]$fileName) {
+  }
+  [void] Decrypt() {}
+  [void] Delete() {}
+  [void] Encrypt() {}
+  [FileStream] Create() {
+    return [IO.File]::Create($this.FullName)
+  }
+  [FileInfo] CopyTo([string]$destFileName) {
+    return $this.CopyTo($destFileName, $false)
+  }
+  [FileInfo] CopyTo([string]$destFileName, [bool]$overwrite) {
+    [void][IO.File]::Copy($this.FullName, $destFileName, $overwrite)
+    return [IO.FileInfo]::new($destFileName)
+  }
+  [FileInfo] MoveTo([string]$destFileName) {
+    return $this.MoveTo($destFileName, $false)
+  }
+  [FileInfo] MoveTo([string]$destFileName, [bool]$overwrite) {
+    [void][IO.File]::Move($this.FullName, $destFileName)
+    return [IO.FileInfo]::new($destFileName)
+  }
+}
+
+class LogsessionConfig {
+  [ValidateNotNullOrWhiteSpace()][string]$TMP = [IO.Path]::GetTempPath()
+  [LogsessionFile]$File = @{}
+}
+
 class LogAppender : IDisposable {
   hidden [ValidateNotNullOrWhiteSpace()][string]$_name = $this.PsObject.TypeNames[0]
   [void] Log([LogEntry]$entry) {
@@ -203,51 +240,14 @@ class XMLAppender : FileAppender {
   }
 }
 
-class LogsessionFile : System.MarshalByRefObject {
-  [string]$Name = [Guid]::NewGuid().Guid
-  [string]$Extension = ".json"
-  [string]$Suffix = "logger"
-  [bool]$IsReadOnly
-
-  LogsessionFile() {
-  }
-  LogsessionFile([string]$fileName) {
-  }
-  [void] Decrypt() {}
-  [void] Delete() {}
-  [void] Encrypt() {}
-  [FileStream] Create() {
-    return [IO.File]::Create($this.FullName)
-  }
-  [FileInfo] CopyTo([string]$destFileName) {
-    return $this.CopyTo($destFileName, $false)
-  }
-  [FileInfo] CopyTo([string]$destFileName, [bool]$overwrite) {
-    [void][IO.File]::Copy($this.FullName, $destFileName, $overwrite)
-    return [IO.FileInfo]::new($destFileName)
-  }
-  [FileInfo] MoveTo([string]$destFileName) {
-    return $this.MoveTo($destFileName, $false)
-  }
-  [FileInfo] MoveTo([string]$destFileName, [bool]$overwrite) {
-    [void][IO.File]::Move($this.FullName, $destFileName)
-    return [IO.FileInfo]::new($destFileName)
-  }
-}
-
-class LogsessionConfig {
-  [ValidateNotNullOrWhiteSpace()][string]$TMP = [IO.Path]::GetTempPath()
-  [LogsessionFile]$File = @{}
-}
-
 class Logsession {
   [string]$LogType
   [bool]$IsDisposed
   [string]$InstanceId
   [string[]]$LogFiles
   [string]$Logdirectory
-  [LogLevel]$MinLevel = 'INFO'
   [LogAppender[]]$Appenders
+  [LogLevel]$MinLevel = 'INFO'
   static [LogsessionConfig]$Config = @{}
   Logsession() {}
   Logsession([string]$InstanceId) {
@@ -276,7 +276,7 @@ class Logsession {
 
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidInvokingEmptyMembers', '')]
 class Logger : PsModuleBase, IDisposable {
-  [LogLevel]$MinLevel = 'INFO'
+  [LogLevel] $MinLevel = 'INFO'
   hidden [IO.FileInfo[]] $_logFiles = @()
   hidden [Type] $_LogType = [LogEntry]
   hidden [Object] $_disposeLock = [Object]::new()
@@ -493,7 +493,7 @@ class NullLogger : Logger {
 
 $typestoExport = @(
   [Logger], [LogEntry], [LogAppender], [LogLevel], [ConsoleAppender], [Logsession],
-  [JsonAppender], [XMLAppender], [LogsessionConfig], [LogAppenderType], [FileAppender], [NullLogger]
+  [JsonAppender], [XMLAppender], [LogsessionFile], [LogsessionConfig], [LogAppenderType], [FileAppender], [NullLogger]
 )
 # Register Type Accelerators
 $TypeAcceleratorsClass = [PsObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')
