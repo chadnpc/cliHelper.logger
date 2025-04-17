@@ -52,10 +52,11 @@ class LogEntry {
 }
 
 class LogsessionFile : ConfigFile {
-  hidden [ValidateNotNullOrWhiteSpace()][string]$_suffix = "-logger"
+  hidden [string]$_suffix = "-logger"
   LogsessionFile() {}
-  LogsessionFile([PSCustomObject]$object) : base($object) {}
   LogsessionFile([string]$fileName) : base($fileName) {}
+  LogsessionFile([PSCustomObject]$object) : base($object) {}
+  LogsessionFile([IO.FileInfo]$file) : base($file) {}
 }
 
 class LogAppender : IDisposable {
@@ -242,7 +243,7 @@ class Logsession {
     return [Logger]::GetDataPath("cliHelper.logger", $subdirName)
   }
   [LogsessionFile] GetConfigFile() {
-    $d = [Logger]::GetDataPath("cliHelper.logger", "config")
+    $d = $this.GetDataPath("config")
     $f = $d | Get-ChildItem | Where-Object { $_.Name -like $this.InstanceId } | Select-Object -First 1
     return $f ? $f : ([LogsessionFile]::new().SetDirectory($d))
   }
