@@ -52,15 +52,10 @@ class LogEntry {
 }
 
 class LogsessionFile : ConfigFile {
-  static hidden [ValidateNotNullOrWhiteSpace()][string]$_suffix = "-logger"
+  hidden [ValidateNotNullOrWhiteSpace()][string]$_suffix = "-logger"
   LogsessionFile() {}
   LogsessionFile([PSCustomObject]$object) : base($object) {}
   LogsessionFile([string]$fileName) : base($fileName) {}
-}
-
-class LogsessionConfig {
-  [ValidateNotNullOrWhiteSpace()][string]$TMP = [IO.Path]::GetTempPath()
-  [LogsessionFile]$File = @{}
 }
 
 class LogAppender : IDisposable {
@@ -222,7 +217,7 @@ class Logsession {
   [string]$Logdirectory
   [LogAppender[]]$Appenders
   [LogLevel]$MinLevel = 'INFO'
-  static [LogsessionConfig]$Config = @{}
+  # [IO.Path]::GetTempPath()
   Logsession() {}
   Logsession([string]$InstanceId) {
     $this.InstanceId = $InstanceId
@@ -240,8 +235,16 @@ class Logsession {
     )
   }
   [string] GetLocation() {
-    $c = [Logsession]::Config
-    return [IO.Path]::Combine($c.TMP, ("{0}.{1}{2}" -f $this.InstanceId, $c.File.Suffix, $c.File.Extension))
+    # return [IO.Path]::Combine($c.TMP, ("{0}.{1}{2}" -f $this.InstanceId, $c.File.Suffix, $c.File.Extension))
+    return $this.GetConfigFile().FullName
+  }
+  [DirectoryInfo] GetDataPath([string]$subdirName) {
+    return [Logger]::GetDataPath("cliHelper.logger", $subdirName)
+  }
+  [LogsessionFile] GetConfigFile() {
+    $d = [Logger]::GetDataPath("cliHelper.logger", "config")
+    $f = $d | Get-ChildItem | Where-Object { $_.Name -like $this.InstanceId } | Select-Object -First 1
+    return $f ? $f : ([LogsessionFile]::new().SetDirectory($d))
   }
   [string] ToString() {
     return ConvertTo-Json($this)
@@ -251,16 +254,14 @@ class Logsession {
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidInvokingEmptyMembers', '')]
 class Logger : PsModuleBase, IDisposable {
   [LogLevel] $MinLevel = 'INFO'
+  [Logsession] $Session = @{}
   hidden [IO.FileInfo[]] $_logFiles = @()
   hidden [Type] $_LogType = [LogEntry]
   hidden [Object] $_disposeLock = [Object]::new()
   hidden [ValidateNotNull()] $_logdirectory
   hidden [ValidateNotNull()] [LogAppender[]] $_appenders = @()
   Logger() {
-    [void][Logger]::From(
-      [IO.Path]::Combine([Logsession]::Config.TMP, [guid]::newguid().guid, 'Logs'),
-      [ref]$this
-    )
+    [void][Logger]::From($this.Session.GetDataPath('Logs'), [ref]$this)
   }
   Logger([string]$Logdirectory) {
     [void][Logger]::From($Logdirectory, [ref]$this)
@@ -310,7 +311,7 @@ class Logger : PsModuleBase, IDisposable {
       )
     )
     $o.Value.Logdirectory = $Logdirectory
-    $o.Value.ToString() | Out-File([IO.FileInfo]::new([IO.Path]::Combine([Logsession]::Config.TMP, "$($o.Value.InstanceId).logger.json")))
+    $o.Value.ToString() | Out-File([IO.FileInfo]::new([IO.Path]::Combine([Logger]::GetDataPath("cliHelper.logger", "config"), "$($o.Value.InstanceId)-logger.json")))
     return $o.Value
   }
   [FileAppender[]] GetFileAppenders() {
@@ -339,7 +340,7 @@ class Logger : PsModuleBase, IDisposable {
     $this.Log($this.CreateEntry($severity, $message, $exception))
   }
   static [Logsession[]] Getallsessions() {
-    $f = [IO.DirectoryInfo]::new([Logsession]::Config.TMP).GetFiles("*.logger.json")
+    $f = [IO.DirectoryInfo]::new([Logger]::GetDataPath("cliHelper.logger", "config")).GetFiles("*-logger.json")
     $i = @(); if ($f.Count -gt 0) {
       $f.ForEach({ $i += ConvertFrom-Json([IO.File]::ReadAllText($_)) })
     }
@@ -468,7 +469,7 @@ class NullLogger : Logger {
 
 $typestoExport = @(
   [Logger], [LogEntry], [LogAppender], [LogLevel], [ConsoleAppender], [Logsession],
-  [JsonAppender], [XMLAppender], [LogsessionFile], [LogsessionConfig], [LogAppenderType], [FileAppender], [NullLogger]
+  [JsonAppender], [XMLAppender], [LogsessionFile], [LogAppenderType], [FileAppender], [NullLogger]
 )
 # Register Type Accelerators
 $TypeAcceleratorsClass = [PsObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')
