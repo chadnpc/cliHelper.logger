@@ -51,14 +51,6 @@ class LogEntry {
   }
 }
 
-class LogsessionFile : ConfigFile {
-  hidden [string]$_suffix = "-logger"
-  LogsessionFile() {}
-  LogsessionFile([string]$fileName) : base($fileName) {}
-  LogsessionFile([PSCustomObject]$object) : base($object) {}
-  LogsessionFile([IO.FileInfo]$file) : base($file) {}
-}
-
 class LogAppender : IDisposable {
   hidden [ValidateNotNullOrWhiteSpace()][string]$_name = $this.PsObject.TypeNames[0]
   [void] Log([LogEntry]$entry) {
@@ -210,33 +202,40 @@ class XMLAppender : FileAppender {
     return @()
   }
 }
-class Logsession {
-  [bool]$IsDisposed
-  [LogLevel]$MinLevel = 'INFO'
+
+class Logsession : ConfigFile, IDisposable {
+  hidden [string] $_suffix = "-logger"
+  hidden [LogLevel] $MinLevel = 'INFO'
   hidden [IO.FileInfo[]] $_logFiles = @()
   hidden [Type] $_LogType = [LogEntry]
   hidden [Object] $_disposeLock = [Object]::new()
   hidden [ValidateNotNull()] [DirectoryInfo] $_logdirectory
   hidden [ValidateNotNull()] [LogAppender[]] $_appenders = @()
-  Logsession() {}
-  Logsession([string]$Id) {
-    $this.PsObject.Properties.Add([PSScriptProperty]::new('Id', [scriptblock]::Create("return '$Id'"), {
-          throw [SetValueException]::new("Id is a read-only Property")
-        }
-      )
-    )
+
+  Logsession() {
+    [void][Logsession]::From($this.GetInstanceId(), $this::GetDataPath("config"), [ref]$this)
   }
-  Logsession([Logger]$ob) {
-    $($this.PsObject.Properties.Name |
-        Select-Object -Exclude Appenders
-    ).ForEach({ $this.$_ = $ob.$_ })
-    $this.Appenders = $ob._appenders ? ([string[]]($ob._appenders._type)) : @()
+  Logsession([string]$Id) : base($Id) {
+    [void][Logsession]::From($Id, $this::GetDataPath("config"), [ref]$this)
   }
-  Logsession([psobject]$o) {
+  Logsession([PSCustomObject]$object) : base($object) {
     $this.PsObject.Properties.Name.ForEach({
-        $this.$_ = $o.$_
+        $this.$_ = $object.$_
       }
     )
+  }
+  Logsession([Logger]$object) {
+    $($this.PsObject.Properties.Name |
+        Select-Object -Exclude Appenders
+    ).ForEach({ $this.$_ = $object.$_ })
+    $this.Appenders = $object._appenders ? ([string[]]($object._appenders._type)) : @()
+  }
+  Logsession([IO.FileInfo]$file) : base($file) {}
+
+  static hidden [Logsession] From([string]$Id, [string]$configdir, [ref]$o) {
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Id', [scriptblock]::Create("return '$Id'"), { throw [SetValueException]::new("Id is a read-only Property") }))
+    $o.Value.SetDirectory($configdir)
+    return $o.Value
   }
   [type] GetLogType() {
     return $this._LogType
@@ -248,7 +247,6 @@ class Logsession {
       throw [SetValueException]::new("LogType must be a Type that implements LogEntry")
     }
   }
-
   [string[]] GetLogFiles() {
     if ($this._appenders.count -gt 0) {
       $this._appenders.FilePath.Where({ $_ -notin $this._logFiles.FullName }).ForEach({ $this._logFiles += $_ })
@@ -259,7 +257,7 @@ class Logsession {
 
   [DirectoryInfo] GetLogdirectory() {
     if ($null -eq $this._logdirectory) {
-      $this.SetLogdirectory($this.GetDataPath('Logs'))
+      $this.SetLogdirectory([Logsession]::GetDataPath('Logs'))
     }
     return $this._logdirectory.ToString()
   }
@@ -280,14 +278,12 @@ class Logsession {
   # [LogAppender[]] GetAppenders() { return $null }
   # [void] SetAppenders() { }
 
-  [DirectoryInfo] GetDataPath([string]$subdirName) {
-    return [Logger]::GetDataPath("cliHelper.logger", $subdirName)
+  static [DirectoryInfo] GetDataPath([string]$subdirName) {
+    return [PsModuleBase]::GetDataPath("cliHelper.logger", $subdirName)
   }
-  [LogsessionFile] GetConfigFile() {
-    $d = $this.GetDataPath("config")
-    $f = $d | Get-ChildItem | Where-Object { $_.Name -like $this.Id } | Select-Object -First 1
-    if (!$f) { $c = [LogsessionFile]::new($this.Id); $c.SetDirectory($d); return $c }
-    return $f
+
+  [string] GetInstanceId() {
+    return [xconvert]::ToGuid([String]::Join([char]45, (Get-Variable Host).Value.InstanceId.Guid, (Get-Variable PID).Value)).Guid
   }
   [hashtable] ToHashtable() {
     $h = @{}; $this.PsObject.Properties.ForEach({ $h[$_.Name] = [string]$_.Value })
@@ -295,6 +291,12 @@ class Logsession {
   }
   [string] ToJson() {
     return ConvertTo-Json($this.ToHashtable())
+  }
+  [void] Dispose() {
+    if ($this.IsDisposed) { return }
+    [void][GC]::SuppressFinalize($this)
+    # ...
+    $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a read-only Property") }))
   }
   [string] ToString() {
     return $this.Id
@@ -304,19 +306,22 @@ class Logsession {
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidInvokingEmptyMembers', '')]
 class Logger : PsModuleBase, IDisposable {
   [LogLevel] $MinLevel = 'INFO'
-  static [Logsession] $Session = [Logger]::CreateSession()
+  [Logsession] $Session = [Logsession]::Create($this::GetDataPath("config"))
 
   Logger() {
     [void][Logger]::From([ref]$this)
   }
   static hidden [Logger] From([ref]$o) {
+    Write-Verbose "+ 0"
     if ($null -eq $o) { throw [ArgumentException]::new("reference is null") };
-    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogFiles', { return [Logger]::Session.GetLogFiles() }, { throw [SetValueException]::new("LogFiles is a read-only Property") }))
-    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Logdirectory', { return [Logger]::Session.GetLogdirectory() }, { param($value) [Logger]::Session.SetLogdirectory($value) }))
-    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogFiles', { return [Logger]::Session.GetLogFiles() }, { throw [SetValueException]::new("LogFiles is a read-only Property") }))
-    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogType', { return [Logger]::Session.GetLogType() }, { param($value) [Logger]::Session.SetLogType($value) }))
-    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Session', { return [string][Logger]::Session }))
-    [Logger]::Session.GetConfigFile().Save()
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogFiles', { return $this.Session.GetLogFiles() }, { throw [SetValueException]::new("LogFiles is a read-only Property") }))
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Logdirectory', { return $this.Session.GetLogdirectory() }, { param($value) $this.Session.SetLogdirectory($value) }))
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogFiles', { return $this.Session.GetLogFiles() }, { throw [SetValueException]::new("LogFiles is a read-only Property") }))
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogType', { return $this.Session.GetLogType() }, { param($value) $this.Session.SetLogType($value) }))
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Session', { return [string]$this.Session }))
+    Write-Verbose "+ 1"
+    $o.Value.Session.Save()
+    Write-Verbose "+ 2"
     return $o.Value
   }
   [FileAppender[]] GetFileAppenders() {
@@ -345,14 +350,11 @@ class Logger : PsModuleBase, IDisposable {
     $this.Log($this.CreateEntry($severity, $message, $exception))
   }
   static [Logsession[]] Getallsessions() {
-    $f = [IO.DirectoryInfo]::new([Logger]::GetDataPath("cliHelper.logger", "config")).GetFiles("*-logger.json")
+    $f = [IO.DirectoryInfo]::new([Logsession]::GetDataPath("config")).GetFiles("*-logger.json")
     $i = @(); if ($f.Count -gt 0) {
       $f.ForEach({ $i += ConvertFrom-Json([IO.File]::ReadAllText($_)) })
     }
     return $i
-  }
-  static [Logsession] CreateSession() {
-    return [Logsession]::new([xconvert]::ToGuid([String]::Join([char]45, (Get-Variable Host).Value.InstanceId.Guid, (Get-Variable PID).Value)).Guid)
   }
   [FileAppender] GetFileAppender() {
     return $this.GetAppenders('File', 1)[0]
@@ -423,7 +425,7 @@ class Logger : PsModuleBase, IDisposable {
   }
   [void] Dispose() {
     if ($this.IsDisposed) { return }
-    [void][GC]::SuppressFinalize($this)
+    [void][GC]::SuppressFinalize($this); $this.Session.Dispose()
     # Dispose appenders that implement IDisposable
     foreach ($appender in $this._appenders) {
       if ($appender -is [IDisposable]) {
@@ -477,7 +479,7 @@ class NullLogger : Logger {
 
 $typestoExport = @(
   [Logger], [LogEntry], [LogAppender], [LogLevel], [ConsoleAppender], [Logsession],
-  [JsonAppender], [XMLAppender], [LogsessionFile], [LogAppenderType], [FileAppender], [NullLogger]
+  [JsonAppender], [XMLAppender], [LogAppenderType], [FileAppender], [NullLogger]
 )
 # Register Type Accelerators
 $TypeAcceleratorsClass = [PsObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')
