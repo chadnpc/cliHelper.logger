@@ -221,7 +221,7 @@ class Logsession {
   Logsession() {}
   Logsession([string]$Id) {
     $this.PsObject.Properties.Add([PSScriptProperty]::new('Id', [scriptblock]::Create("return '$Id'"), {
-          throw [SetValueException]::new("InstanceId is a read-only Property")
+          throw [SetValueException]::new("Id is a read-only Property")
         }
       )
     )
@@ -276,6 +276,7 @@ class Logsession {
     $this._logdirectory = [DirectoryInfo]::new($Ld)
   }
 
+  # TODO: add implementation of:
   # [LogAppender[]] GetAppenders() { return $null }
   # [void] SetAppenders() { }
 
@@ -284,16 +285,19 @@ class Logsession {
   }
   [LogsessionFile] GetConfigFile() {
     $d = $this.GetDataPath("config")
-    $f = $d | Get-ChildItem | Where-Object { $_.Name -like $this.InstanceId } | Select-Object -First 1
-    if (!$f) { $c = [LogsessionFile]::new($this.InstanceId); $c.SetDirectory($d); return $c }
+    $f = $d | Get-ChildItem | Where-Object { $_.Name -like $this.Id } | Select-Object -First 1
+    if (!$f) { $c = [LogsessionFile]::new($this.Id); $c.SetDirectory($d); return $c }
     return $f
   }
   [hashtable] ToHashtable() {
     $h = @{}; $this.PsObject.Properties.ForEach({ $h[$_.Name] = [string]$_.Value })
     return $h
   }
-  [string] ToString() {
+  [string] ToJson() {
     return ConvertTo-Json($this.ToHashtable())
+  }
+  [string] ToString() {
+    return $this.Id
   }
 }
 
@@ -307,12 +311,12 @@ class Logger : PsModuleBase, IDisposable {
   }
   static hidden [Logger] From([ref]$o) {
     if ($null -eq $o) { throw [ArgumentException]::new("reference is null") };
-    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogFiles', { $this.Session.GetLogFiles() }, { throw [SetValueException]::new("LogFiles is a read-only Property") }))
-    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Logdirectory', { $this.Session.GetLogdirectory() }, { param($value) $this.Session.SetLogdirectory($value) }))
-    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogFiles', { $this.Session.GetLogFiles() }, { throw [SetValueException]::new("LogFiles is a read-only Property") }))
-    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogType', { $this.Session.GetLogType() }, { param($value) $this.Session.SetLogType($value) }))
-    $o.Value.PsObject.Properties.Add([PSAdaptedProperty]::new('InstanceId', $o.Value.Session.Id ))
-    $o.Value.Session.GetConfigFile().Save()
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogFiles', { return [Logger]::Session.GetLogFiles() }, { throw [SetValueException]::new("LogFiles is a read-only Property") }))
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Logdirectory', { return [Logger]::Session.GetLogdirectory() }, { param($value) [Logger]::Session.SetLogdirectory($value) }))
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogFiles', { return [Logger]::Session.GetLogFiles() }, { throw [SetValueException]::new("LogFiles is a read-only Property") }))
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogType', { return [Logger]::Session.GetLogType() }, { param($value) [Logger]::Session.SetLogType($value) }))
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Session', { return [string][Logger]::Session }))
+    [Logger]::Session.GetConfigFile().Save()
     return $o.Value
   }
   [FileAppender[]] GetFileAppenders() {
@@ -446,7 +450,7 @@ class Logger : PsModuleBase, IDisposable {
 
   [string] ToString() {
     return @{
-      InstanceId   = $this.InstanceId
+      Session      = $this.Session
       IsDisposed   = [bool]$this.IsDisposed
       LogType      = [string]$this.LogType
       MinLevel     = [string]$this.MinLevel
