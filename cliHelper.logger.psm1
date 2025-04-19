@@ -204,13 +204,13 @@ class XMLAppender : FileAppender {
 }
 
 class Logsession : IDisposable {
-  [ValidateNotNullOrWhiteSpace()][string] $Id                   # Read-only after creation
+  [ValidateNotNullOrWhiteSpace()][string] $Id                   # todo: make it Read-only after creation
+  [ValidateNotNull()] [LogAppender[]] $LogAppenders = @()
   hidden [ValidateNotNullOrEmpty()][ConfigFile] $File           # Handles the config file persistence
   hidden [ValidateNotNullOrEmpty()][hashtable] $Metadata        # Extra arbitrary info (hostname, user, script, etc.)
   hidden [ValidateNotNullOrEmpty()][List[FileInfo]] $LogFiles   # Paths of associated log files created in this session
   hidden [ValidateNotNullOrEmpty()][Type] $LogType = [LogEntry] # Runtime type object
   hidden [ValidateNotNull()] [DirectoryInfo] $Logdir
-  hidden [ValidateNotNull()] [LogAppender[]] $Appenders = @()
   hidden [bool] $IsDisposed = $false
 
   Logsession() {
@@ -240,7 +240,6 @@ class Logsession : IDisposable {
     $ob.LogFiles ? $ob.LogFiles.ForEach({ $o.Value.AddLogFile($_) }) : $null
     $o.Value.SetLogdir(($ob.Logdir ? $ob.Logdir : $o.Value.get_datapath("Logs")))
     $o.Value.SetLogType(($ob.LogType ? $ob.LogType : [LogEntry]))
-    Write-Verbose "[Logsession] Successfully created '$($o.Value.Id)'."
     return $o.Value
   }
   static hidden [Logsession] From([string]$SessionId, [string]$Logdir, [ref]$o) {
@@ -261,8 +260,8 @@ class Logsession : IDisposable {
     }
   }
   [string[]] GetLogFiles() {
-    if ($this._appenders.count -gt 0) {
-      $this._appenders.FilePath.Where({ $_ -notin $this.LogFiles.FullName }).ForEach({ $this.LogFiles += $_ })
+    if ($this.LogAppenders.count -gt 0) {
+      $this.LogAppenders.FilePath.Where({ $_ -notin $this.LogFiles.FullName }).ForEach({ $this.LogFiles += $_ })
     }
     # Return a copy to prevent external modification of the internal list
     return $this.LogFiles.ToArray()
@@ -323,11 +322,11 @@ class Logsession : IDisposable {
   [void] Save() {
     if ($this.IsDisposed) { throw [ObjectDisposedException]::new($this.GetType().Name) }
     if ($null -eq $this.File) { throw [InvalidOperationException]::new("Cannot save session, ConfigFile property is not set.") }
-    Write-Verbose "[Logsession '$($this.Id)'] Saving session to '$($this.File.FullName)'..."
+    Write-Debug "[Logsession '$($this.Id)'] Saving session to '$($this.File.FullName)'..."
     $jsonContent = $this.ToJson()
     try {
       $this.File.Save($jsonContent)
-      Write-Verbose "[Logsession '$($this.Id)'] Session saved successfully."
+      Write-Debug "[Logsession '$($this.Id)'] Saved successfully."
     } catch {
       throw [System.IO.IOException]::new("Failed to save session file '$($this.File.FullName)'.", $_.Exception)
     }
@@ -339,7 +338,7 @@ class Logsession : IDisposable {
       Id       = [string]$this.Id
       Logdir   = [string]$this.Logdir
       LogType  = [string]$this.LogType
-      LogFiles = [string[]]($this.LogFiles ? $this.LogFiles.ToArray() : @()) # Store as simple array
+      LogFiles = [string[]]($this.LogFiles ? $this.LogFiles.ToArray() : @())
       Metadata = $this.Metadata
     }
   }
@@ -378,23 +377,20 @@ class Logger : PsModuleBase, IDisposable {
     [void][Logger]::From([ref]$this)
   }
   static hidden [Logger] From([ref]$o) {
-    Write-Verbose "+ 0"
-    if ($null -eq $o) { throw [ArgumentException]::new("reference is null") };
+    if ($null -eq $o) { throw [ArgumentException]::new("Empty PsReference for Logger object") };
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Logdir', { return $this.Session.GetLogdir() }, { param($value) $this.Session.SetLogdir($value) }))
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogFiles', { return $this.Session.GetLogFiles() }, { throw [SetValueException]::new("LogFiles is a read-only Property") }))
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogType', { return $this.Session.GetLogType() }, { param($value) $this.Session.SetLogType($value) }))
-    Write-Verbose "+ 1"
     $o.Value.Session.Save()
-    Write-Verbose "+ 2"
     return $o.Value
   }
   [FileAppender[]] GetFileAppenders() {
-    return $this._appenders.Where({ $_.PsObject.TypeNames.Contains("FileAppender") })
+    return $this.Session.LogAppenders.Where({ $_.PsObject.TypeNames.Contains("FileAppender") })
   }
   [void] Log([LogEntry]$entry) {
     if ($this.IsDisposed) { throw [InvalidOperationException]::new("$($this.GetType().Name) is already disposed") }
-    if ($this._appenders.Count -lt 1) { $this.AddLogAppender([ConsoleAppender]::new()) }
-    foreach ($appender in $this._appenders) {
+    if ($this.Session.LogAppenders.Count -lt 1) { $this.AddLogAppender([ConsoleAppender]::new()) }
+    foreach ($appender in $this.Session.LogAppenders) {
       try {
         $appender.Log($entry)
       } catch {
@@ -436,19 +432,19 @@ class Logger : PsModuleBase, IDisposable {
     $this.AddLogAppender([ConsoleAppender]::new())
   }
   [void] AddLogAppender([LogAppender]$LogAppender) {
-    if ($this._appenders.Count -gt 0) {
-      if ($this._appenders._name.Contains($LogAppender._name)) {
+    if ($this.Session.LogAppenders.Count -gt 0) {
+      if ($this.Session.LogAppenders._name.Contains($LogAppender._name)) {
         Write-Warning "$LogAppender is already added"
         return
       }
     }
-    $this._appenders += $LogAppender
+    $this.Session.LogAppenders += $LogAppender
   }
   [LogAppender[]] GetAppenders([LogAppenderType]$type) {
     return $this.GetAppenders($type, -1)
   }
   [LogAppender[]] GetAppenders([LogAppenderType]$type, [int]$MinCount) {
-    $a = $this._appenders.Where({ $_._type -eq $type })
+    $a = $this.Session.LogAppenders.Where({ $_._type -eq $type })
     if ($MinCount -ge 0 -and $a.count -gt $MinCount) { throw [InvalidOperationException]::new("Found more than one  $type appender!") }
     if ($null -eq $a) { return $null }
     return $a
@@ -491,7 +487,7 @@ class Logger : PsModuleBase, IDisposable {
     if ($this.IsDisposed) { return }
     [void][GC]::SuppressFinalize($this); $this.Session.Dispose()
     # Dispose appenders that implement IDisposable
-    foreach ($appender in $this._appenders) {
+    foreach ($appender in $this.Session.LogAppenders) {
       if ($appender -is [IDisposable]) {
         try {
           $appender.Dispose()
@@ -522,7 +518,7 @@ class Logger : PsModuleBase, IDisposable {
       MinLevel   = [string]$this.MinLevel
       LogFiles   = [string[]]$this.Session.GetLogFiles()
       Logdir     = [string]$this.Session.GetLogdir()
-      Appenders  = $this._appenders ? ([string[]]($this._appenders._type)) : @()
+      Appenders  = $this.Session.LogAppenders ? ([string[]]($this.Session.LogAppenders._type)) : @()
     } | ConvertTo-Json
   }
 }
