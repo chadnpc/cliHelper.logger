@@ -204,20 +204,14 @@ class XMLAppender : FileAppender {
 }
 
 class Logsession : IDisposable {
-  [ValidateNotNullOrWhiteSpace()][string] $Id           # Read-only after creation
-  [ValidateNotNullOrEmpty()][ConfigFile] $File          # Handles the config file persistence
-  [ValidateNotNullOrWhiteSpace()][string] $Logdir       # Resolved path where logs should go
-  [ValidateNotNullOrWhiteSpace()][string] $LogType      # Fully qualified name of the LogEntry type for serialization
-  [ValidateNotNullOrEmpty()][hashtable] $Metadata       # Extra arbitrary info (hostname, user, script, etc.)
-  [ValidateNotNullOrEmpty()][List[string]] $LogFiles    # Paths of associated log files created in this session
-
-  hidden [FileInfo[]] $_logFiles = @()
-  hidden [Object] $_disposeLock = [Object]::new()
-  hidden [ValidateNotNull()] [DirectoryInfo] $_Logdir
-  hidden [ValidateNotNull()] [LogAppender[]] $_appenders = @()
-  hidden [ValidateNotNullOrEmpty()][Type] $_logType = [LogEntry] # Runtime type object
-  hidden [ValidateNotNullOrEmpty()][Object] $_syncRoot   # For thread safety if needed later
-  hidden [bool] $_IsDisposed = $false
+  [ValidateNotNullOrWhiteSpace()][string] $Id                   # Read-only after creation
+  hidden [ValidateNotNullOrEmpty()][ConfigFile] $File           # Handles the config file persistence
+  hidden [ValidateNotNullOrEmpty()][hashtable] $Metadata        # Extra arbitrary info (hostname, user, script, etc.)
+  hidden [ValidateNotNullOrEmpty()][List[FileInfo]] $LogFiles   # Paths of associated log files created in this session
+  hidden [ValidateNotNullOrEmpty()][Type] $LogType = [LogEntry] # Runtime type object
+  hidden [ValidateNotNull()] [DirectoryInfo] $Logdir
+  hidden [ValidateNotNull()] [LogAppender[]] $Appenders = @()
+  hidden [bool] $IsDisposed = $false
 
   Logsession() {
     [void][Logsession]::From($this.get_instanceId(), $this.get_datapath("config"), [ref]$this)
@@ -226,20 +220,15 @@ class Logsession : IDisposable {
     [void][Logsession]::From($Id, $this.get_datapath("config"), [ref]$this)
   }
   Logsession([PsObject]$object) {
-    [void][Logsession]::From($this::parse_configdata($object), [ref]$this)
-  }
-  Logsession([Logger]$object) {
-    $($this.PsObject.Properties.Name |
-        Select-Object -Exclude Appenders
-    ).ForEach({ $this.$_ = $object.$_ })
-    $this.Appenders = $object._appenders ? ([string[]]($object._appenders._type)) : @()
+    [void][Logsession]::From($this.get_configdata($object), [ref]$this)
   }
   Logsession([string]$SessionId, [string]$Logdir) {
     [void][Logsession]::From($SessionId, $Logdir, [ref]$this)
   }
   static hidden [Logsession] From([PSCustomObject]$object, [ref]$o) {
-    $d = [Logsession]::parse_configdata($object)
+    $d = $o.Value.get_configdata($object)
     $f = [ConfigFile]::new($d.Id); $f.SetDirectory($d.Logdir)
+    # Other props to check: ("LogType", "LogFiles", "Metadata")
     return [Logsession]::From($f, $o)
   }
   static hidden [Logsession] From([ConfigFile]$configFile, [ref]$o) {
@@ -262,21 +251,23 @@ class Logsession : IDisposable {
     return [PsModuleBase]::GetDataPath("cliHelper.logger", $subdirName)
   }
   [Type] GetLogType() {
-    return $this._logType
+    return $this.LogType
   }
-
   [void] SetLogType([type]$value) {
     if ($value -is [Type] -and ($value -eq [LogEntry] -or $value.IsSubclassOf([LogEntry]))) {
-      $this.LogType = $value.FullName # Store the name for serialization
-      $this._logType = $value
+      $this.LogType = $value
     } else {
       throw [ArgumentException]::new("LogType must be [LogEntry] or a Type that inherits from LogEntry. Provided: '$($value.FullName)'")
     }
   }
   [string[]] GetLogFiles() {
+    if ($this._appenders.count -gt 0) {
+      $this._appenders.FilePath.Where({ $_ -notin $this.LogFiles.FullName }).ForEach({ $this.LogFiles += $_ })
+    }
     # Return a copy to prevent external modification of the internal list
     return $this.LogFiles.ToArray()
   }
+  [void] SetLogFiles([string[]]$files) { }
   [void] AddLogFile([string]$filePath) {
     $path = [PsModuleBase]::GetUnResolvedPath($filePath)
     $l = ($null -ne $this.LogFiles) ? $this.LogFiles : [List[string]]::new()
@@ -286,12 +277,11 @@ class Logsession : IDisposable {
     }
     $this.LogFiles = $l
   }
-
   [string] GetLogdir() {
-    if ([string]::IsNullOrWhiteSpace($this._Logdir)) {
+    if ([string]::IsNullOrWhiteSpace($this.Logdir)) {
       $this.SetLogdir($this.get_datapath("Logs"))
     }
-    return $this._Logdir
+    return $this.Logdir
   }
   [void] SetLogdir([string]$value) {
     $dir = [PsModuleBase]::GetUnResolvedPath($value)
@@ -306,32 +296,24 @@ class Logsession : IDisposable {
         throw [IOException]::new("Failed to create log directory '$dir'.", $_.Exception)
       }
     }
-    $this._Logdir = $dir
+    $this.Logdir = $dir
   }
-  [string[]] GetLogFiles() {
-    if ($this._appenders.count -gt 0) {
-      $this._appenders.FilePath.Where({ $_ -notin $this._logFiles.FullName }).ForEach({ $this._logFiles += $_ })
-    }
-    return ($this._logFiles | Select-Object @{ l = "value"; e = { [FileInfo]::new($_) } }).value
-  }
-  # [void] SetLogFiles([string[]]$files) { }
+
   hidden [string] get_datapath([string]$subdirName) {
     [ValidateNotNullOrWhiteSpace()][string]$subdirName = $subdirName
     return [PsModuleBase]::GetDataPath("cliHelper.logger", $subdirName)
   }
-  static hidden [Object] parse_configdata([PsObject]$object) {
+  hidden [Object] get_configdata([PsObject]$object) {
     [ValidateNotNullOrWhiteSpace()][psobject]$object = $object
     # checks for the important properties
-    $props = @("Id", "Logdir"); $missingprops = @()
+    $props = @("Id", "Logdir"); $MissingProps = @()
+    # $other_not_important_props = @("LogType", "LogFiles", "Metadata")
     $selected = $object | Select-Object * -ExcludeProperty $props
-    $props.ForEach({ $selected.PsObject.Properties.Add([psnoteproperty]::new($_, ($object.$_ ? $object.$_ : $($missingprops.Add($_); $null)))) })
-    if ($missingprops.Count -gt 0) {
-      throw [MetadataException]::new(('$missingprops = @("{0}")' -f ($missingprops -join ', "')))
+    $props.ForEach({ $selected.PsObject.Properties.Add([psnoteproperty]::new($_, ($object.$_ ? $object.$_ : $($MissingProps.Add($_); $null)))) })
+    if ($MissingProps.Count -gt 0) {
+      throw [MetadataException]::new(('$MissingProps = @("{0}")' -f ($MissingProps -join ', "')))
     }
     return $selected
-  }
-  static hidden [string[]] get_configurableprops() {
-    return ("Id", "Logdir", "LogType", "Metadata", "LogFiles")
   }
   hidden [string] get_instanceId() {
     # will always be the same if requested in the same host session.
@@ -339,9 +321,8 @@ class Logsession : IDisposable {
   }
 
   [void] Save() {
-    if ($this._IsDisposed) { throw [ObjectDisposedException]::new($this.GetType().Name) }
+    if ($this.IsDisposed) { throw [ObjectDisposedException]::new($this.GetType().Name) }
     if ($null -eq $this.File) { throw [InvalidOperationException]::new("Cannot save session, ConfigFile property is not set.") }
-
     Write-Verbose "[Logsession '$($this.Id)'] Saving session to '$($this.File.FullName)'..."
     $jsonContent = $this.ToJson()
     try {
@@ -355,10 +336,10 @@ class Logsession : IDisposable {
   [hashtable] ToHashtable() {
     # Explicitly select properties for serialization
     return @{
-      Id       = $this.Id
-      Logdir   = $this.Logdir
-      LogType  = $this.LogType
-      LogFiles = $this.LogFiles.ToArray() # Store as simple array
+      Id       = [string]$this.Id
+      Logdir   = [string]$this.Logdir
+      LogType  = [string]$this.LogType
+      LogFiles = [string[]]($this.LogFiles ? $this.LogFiles.ToArray() : @()) # Store as simple array
       Metadata = $this.Metadata
     }
   }
@@ -368,11 +349,11 @@ class Logsession : IDisposable {
   }
 
   [void] Dispose() {
-    if ($this._IsDisposed) { throw [ObjectDisposedException]::new($this.GetType().Name) }
+    if ($this.IsDisposed) { throw [ObjectDisposedException]::new($this.GetType().Name) }
     Write-Debug "[Logsession '$($this.Id)'] Disposing..."
     # Primarily marks as disposed. If ConfigFile held resources, it would be disposed here.
     # Currently, ConfigFile seems to manage its own state regarding file handles.
-    $this._IsDisposed = $true
+    $this.IsDisposed = $true
     [void][GC]::SuppressFinalize($this)
     # ...
     # $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a read-only Property") }))
@@ -399,11 +380,9 @@ class Logger : PsModuleBase, IDisposable {
   static hidden [Logger] From([ref]$o) {
     Write-Verbose "+ 0"
     if ($null -eq $o) { throw [ArgumentException]::new("reference is null") };
-    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogFiles', { return $this.Session.GetLogFiles() }, { throw [SetValueException]::new("LogFiles is a read-only Property") }))
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Logdir', { return $this.Session.GetLogdir() }, { param($value) $this.Session.SetLogdir($value) }))
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogFiles', { return $this.Session.GetLogFiles() }, { throw [SetValueException]::new("LogFiles is a read-only Property") }))
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogType', { return $this.Session.GetLogType() }, { param($value) $this.Session.SetLogType($value) }))
-    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Session', { return [string]$this.Session }))
     Write-Verbose "+ 1"
     $o.Value.Session.Save()
     Write-Verbose "+ 2"
@@ -539,10 +518,10 @@ class Logger : PsModuleBase, IDisposable {
     return @{
       Session    = $this.Session
       IsDisposed = [bool]$this.IsDisposed
-      LogType    = [string]$this.LogType
+      LogType    = [string]$this.Session.GetLogType()
       MinLevel   = [string]$this.MinLevel
-      LogFiles   = [string[]]$this.LogFiles
-      Logdir     = [string]$this.Logdir
+      LogFiles   = [string[]]$this.Session.GetLogFiles()
+      Logdir     = [string]$this.Session.GetLogdir()
       Appenders  = $this._appenders ? ([string[]]($this._appenders._type)) : @()
     } | ConvertTo-Json
   }
