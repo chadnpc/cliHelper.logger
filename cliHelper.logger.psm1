@@ -6,6 +6,7 @@ using namespace System.Collections.Generic
 using namespace System.Management.Automation
 using namespace System.Collections.Concurrent
 
+#Requires -Psedition Core
 #Requires -Modules PsModuleBase
 
 # Enums
@@ -70,6 +71,16 @@ class LogAppender : IDisposable {
     }
     return $line
   }
+  hidden [bool] IsSafetoLog() {
+    return $this.IsSafetoLog($false)
+  }
+  hidden [bool] IsSafetoLog([bool]$throwonError) {
+    $IsSafe = $this.IsDisposed
+    # todo: perform other checks here:
+    # ex: $IsSafe = $IsSafe -and ...
+    if ($throwonError -and !$IsSafe) { throw [ObjectDisposedException]::new("$($this.GetType().Name) is already disposed") }
+    return $IsSafe
+  }
   [void] Dispose() {
     if ($this.IsDisposed) { return }
     $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("IsDisposed is a ReadOnly Property") }))
@@ -117,7 +128,7 @@ class FileAppender : LogAppender {
     $this._writer.AutoFlush = $true # Flush after every write
   }
   [void] Log([LogEntry]$entry) {
-    if ($this.IsDisposed) { throw [InvalidOperationException]::new("$($this.GetType().Name) is already disposed") }
+    [void]$this.IsSafetoLog($true)
     $logLine = $this.GetlogLine($entry)
     # Add exception info if present
     if ($null -ne $entry.Exception) {
@@ -170,7 +181,7 @@ class JsonAppender : FileAppender {
   hidden [ValidateNotNullOrEmpty()][LogAppenderType]$_type = "JSON"
   JsonAppender([string]$Path) : base($Path) {}
   [void] Log([LogEntry]$entry) {
-    if ($this.IsDisposed) { throw [InvalidOperationException]::new("$($this.GetType().Name) is already disposed") }
+    $this.IsSafetoLog($true)
     try {
       $this._writer.WriteLine($this.GetlogLine($entry))
       # AutoFlush is true, manual flush shouldn't be needed unless guaranteeing write before potential crash
@@ -362,12 +373,8 @@ class Logsession : IDisposable {
   [void] Dispose() {
     if ($this.IsDisposed) { throw [ObjectDisposedException]::new($this.GetType().Name) }
     Write-Debug "[Logsession '$($this.Id)'] Disposing..."
-    # Primarily marks as disposed. If ConfigFile held resources, it would be disposed here.
-    # Currently, ConfigFile seems to manage its own state regarding file handles.
-    $this.IsDisposed = $true
     [void][GC]::SuppressFinalize($this)
-    # ...
-    # $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a ReadOnly Property") }))
+    $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a ReadOnly Property") }))
   }
   [string] ToString() {
     $str = "[LogSession]@{0}" -f (ConvertTo-Json(@{
@@ -400,7 +407,6 @@ class Logger : PsModuleBase, IDisposable {
     return $this.Session.LogAppenders.Where({ $_.PsObject.TypeNames.Contains("FileAppender") })
   }
   [void] Log([LogEntry]$entry) {
-    if ($this.IsDisposed) { throw [InvalidOperationException]::new("$($this.GetType().Name) is already disposed") }
     if ($this.Session.LogAppenders.Count -lt 1) { $this.AddLogAppender([ConsoleAppender]::new()) }
     foreach ($appender in $this.Session.LogAppenders) {
       try {
@@ -414,7 +420,6 @@ class Logger : PsModuleBase, IDisposable {
     $this.Log($severity, $message, $null)
   }
   [void] Log([LogLevel]$severity, [string]$message, [Exception]$exception) {
-    if ($this.IsDisposed) { throw [InvalidOperationException]::new("$($this.GetType().Name) is already disposed") }
     if (!$this.IsEnabled($severity)) {
       Write-Debug "[Logger] "$severity" loglevel is disabled. Skipped log message : $message"
       return
