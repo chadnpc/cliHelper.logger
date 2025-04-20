@@ -35,10 +35,8 @@
 
   Process {
     try {
-      if (!$Logger.Logdirectory.Exists) {
-        throw "Please set the `$Logger.Logdirectory first!"
-      }
-      $JsonFilePath = [Logger]::GetUnResolvedPath([IO.Path]::Combine($Logger.Logdirectory, $FileName))
+      if (!$Logger.Logdir.Exists) { throw "Please create & set Logdir first!" }
+      $JsonFilePath = [Logger]::GetUnResolvedPath([IO.Path]::Combine($Logger.Logdir, $FileName))
       if (![IO.File]::Exists($JsonFilePath)) { New-Item -Path $JsonFilePath -ItemType File -Force | Out-Null }
       Write-Debug "[Logger] Attempting to add JsonAppender for path: $JsonFilePath"
       $Logger.AddLogAppender([JsonAppender]::new($JsonFilePath))
