@@ -129,11 +129,11 @@ try {
   $logger = [Logger]::new()
   $logger.LogType = [CustomEntry]
   $logger.Info("Logging event with custom entry type.")
-  $logger.Info("By default, If no LogAppender is added, Logs will passthru the console (like this).")
+  $logger.Info("By default, If no LogAppender is added, Logs will only show in the console (like this).")
 } finally {
   $logger.Dispose()
 }
-$logger.Info("more info") # will throw an error, since its disposed.
+$logger.Info("Trying to log something else...") # will throw an error, since its disposed.
 ```
 
 Read the docs for more information on the [concepts](docs/Readme.md) used.
