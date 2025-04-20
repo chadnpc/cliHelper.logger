@@ -21,10 +21,12 @@ This is the easiest way to get started with scripts or interactive sessions.
 Import-Module cliHelper.logger
 
 try {
-  # 1. Create a logger instance (defaults to Info level, Console and File appenders)
-  #    Logs will go to .$env:TEMP by default. or specify a custom directory.
-  $logPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs");
-  $logger = New-Logger -Logdir $logPath -Level Debug
+  # 1. Create a logger instance with Console and File appenders (defaults)
+  $logger = New-Logger -Level Debug
+  # anything below debug level won't be logged. ie, see:
+  # ([LogLevel[]][Enum]::GetNames[LogLevel]()).ForEach({ [PsCustomObject]@{ Name = $_ ; value = $_.value__ } })
+
+  $logPath = [string]$logger.Logdir
 
   $logger | Add-JsonAppender
   $logger | Write-LogEntry -Level Info -Message "Application started in directory: $logPath"
@@ -53,8 +55,7 @@ try {
 
 ```PowerShell
 try {
-  $logPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs");
-  $logger = New-Logger -Logdir $logPath
+  $logger = [IO.Path]::Combine([IO.Path]::GetTempPath(), "MyAppLogs") | New-Logger
   # Add a JSON appender to the same logger
   $logger | Add-JsonAppender
   $logger | Write-LogEntry -level Info -Message "Added JSON appender. Logs now go to Console, `$env:TMP/*{guid-filename}.log, and `$env:TMP/*{guid-filename}.json"
@@ -133,10 +134,12 @@ try {
 } finally {
   $logger.Dispose()
 }
-$logger.Info("Trying to log something else...") # will throw an error, since its disposed.
+$logger.Info("Trying to log something else...")
+# this should throw an error:
+# OperationStopped: Cannot access a disposed object. Object name: 'ConsoleAppender is already disposed'.
 ```
 
-Read the docs for more information on the [concepts](docs/Readme.md) used.
+Read the docs for more [usage info](docs/Readme.md).
 
 #### NOTES:
 
