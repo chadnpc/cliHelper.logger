@@ -215,10 +215,10 @@ class XMLAppender : FileAppender {
 }
 
 class Logsession : IDisposable {
-  [ValidateNotNull()][LogAppender[]] $LogAppenders = @()
   [ValidateNotNull()][ConfigFile] $File                     # Handles the config file persistence
   hidden [ValidateNotNull()][List[FileInfo]] $_logFiles     # Paths of associated log files created in this session
   hidden [ValidateNotNull()][Type] $_logType = [LogEntry]   # Runtime type object
+  hidden [ValidateNotNull()][LogAppender[]] $_logAppenders = @()
   hidden [ValidateNotNull()][DirectoryInfo] $_logdir
   hidden [bool] $IsDisposed
 
@@ -290,6 +290,24 @@ class Logsession : IDisposable {
     $o.Value.LogType = $i.LogType ? $i.LogType : [LogEntry]
     $i.LogFiles ? $i.LogFiles.ForEach({ $o.Value.add_logfile($_) }) : $null
     return $o.Value
+  }
+  [LogAppender[]] GetAppenders() {
+    $array = @(); [Enum]::GetNames[LogAppenderType]().ForEach({
+        $a = $this.GetAppenders($_);
+        if ($null -ne $a) { $array += $a }
+      }
+    )
+    return $array
+  }
+  [LogAppender[]] GetAppenders([LogAppenderType]$type) {
+    return $this.GetAppenders($type, -1)
+  }
+  [LogAppender[]] GetAppenders([LogAppenderType]$type, [int]$MinCount) {
+    $array = $this._logAppenders.Where({ $_._type -eq $type })
+    if ($MinCount -ge 0 -and $array.count -gt $MinCount) {
+      throw [InvalidOperationException]::new("Found more than one $type appender!")
+    }
+    return $array
   }
   [void] Save() {
     if ($this.IsDisposed) { throw [ObjectDisposedException]::new($this.GetType().Name) }
@@ -387,6 +405,7 @@ class Logsession : IDisposable {
   }
 }
 
+
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidInvokingEmptyMembers', '')]
 class Logger : PsModuleBase, IDisposable {
   [LogLevel] $MinLevel = 'INFO'
@@ -400,6 +419,7 @@ class Logger : PsModuleBase, IDisposable {
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Logdir', { return $this.Session.Logdir }, { param($value) $this.Session.set_logdir($value) }))
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogFiles', { return $this.Session.LogFiles }, { throw [SetValueException]::new("LogFiles is a ReadOnly Property") }))
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogType', { return $this.Session.LogType }, { param($value) $this.Session.LogType = $value }))
+    $o.Value.Session.PsObject.Properties.Add([PSScriptProperty]::new('LogAppenders', { return $this.Session.GetAppenders() }, { throw [SetValueException]::new("LogAppenders is a ReadOnly Property") }))
     $o.Value.Session.Save()
     return $o.Value
   }
@@ -434,16 +454,16 @@ class Logger : PsModuleBase, IDisposable {
     return $i
   }
   [FileAppender] GetFileAppender() {
-    return $this.GetAppenders('File', 1)[0]
+    return $this.Session.GetAppenders('File', 1)[0]
   }
   [ConsoleAppender] GetConsoleAppender() {
-    return $this.GetAppenders('CONSOLE', 1)[0]
+    return $this.Session.GetAppenders('CONSOLE', 1)[0]
   }
   [XMLAppender] GetXMLAppender() {
-    return $this.GetAppenders("JSON", 1)[0]
+    return $this.Session.GetAppenders("JSON", 1)[0]
   }
   [JsonAppender] GetJsonAppender() {
-    return $this.GetAppenders("JSON", 1)[0]
+    return $this.Session.GetAppenders("JSON", 1)[0]
   }
   [void] AddLogAppender() {
     $this.AddLogAppender([ConsoleAppender]::new())
@@ -455,16 +475,7 @@ class Logger : PsModuleBase, IDisposable {
         return
       }
     }
-    $this.Session.LogAppenders += $LogAppender
-  }
-  [LogAppender[]] GetAppenders([LogAppenderType]$type) {
-    return $this.GetAppenders($type, -1)
-  }
-  [LogAppender[]] GetAppenders([LogAppenderType]$type, [int]$MinCount) {
-    $a = $this.Session.LogAppenders.Where({ $_._type -eq $type })
-    if ($MinCount -ge 0 -and $a.count -gt $MinCount) { throw [InvalidOperationException]::new("Found more than one  $type appender!") }
-    if ($null -eq $a) { return $null }
-    return $a
+    $this.Session._logAppenders += $LogAppender
   }
   [LogEntry] CreateEntry([LogLevel]$severity, [string]$message) {
     return $this.CreateEntry($severity, $message, $null)
