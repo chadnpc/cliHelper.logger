@@ -27,7 +27,7 @@ enum LogAppenderType {
 
 
 # .EXAMPLE
-# New-Object LogEntry
+# New-Object LogEntry # same as: [LogEntry]@{}
 class LogEntry {
   [string]$Message
   [LogLevel]$Severity
@@ -75,11 +75,11 @@ class LogAppender : IDisposable {
     return $this.IsSafetoLog($false)
   }
   hidden [bool] IsSafetoLog([bool]$throwonError) {
-    $IsSafe = $this.IsDisposed
+    $s = $true
+    $s = $s -and (($throwonError -and $this.IsDisposed) ? $(throw [ObjectDisposedException]::new("$($this.GetType().Name) is already disposed")) : $false)
     # todo: perform other checks here:
-    # ex: $IsSafe = $IsSafe -and ...
-    if ($throwonError -and !$IsSafe) { throw [ObjectDisposedException]::new("$($this.GetType().Name) is already disposed") }
-    return $IsSafe
+    # ex: $s = $s -and ...
+    return $s
   }
   [void] Dispose() {
     if ($this.IsDisposed) { return }
@@ -92,7 +92,6 @@ class LogAppender : IDisposable {
 
 # Appender that writes to the PowerShell console with colors
 class ConsoleAppender : LogAppender {
-  hidden [ValidateNotNullOrEmpty()][LogAppenderType]$_type = "CONSOLE"
   static [Hashtable]$ColorMap = @{
     DEBUG = [ConsoleColor]::DarkGray
     INFO  = [ConsoleColor]::Green
@@ -100,7 +99,15 @@ class ConsoleAppender : LogAppender {
     ERROR = [ConsoleColor]::Red
     FATAL = [ConsoleColor]::Magenta
   }
+  ConsoleAppender() {
+    $this.PsObject.Properties.Add([PSScriptProperty]::new('Type', [scriptblock]::Create("return [LogAppenderType]'CONSOLE'"), {
+          throw [SetValueException]::new('"Type" is a ReadOnly property')
+        }
+      )
+    )
+  }
   [void] Log([LogEntry]$entry) {
+    $this.IsSafetoLog($true)
     Write-Host $this.GetlogLine($entry) -f ([ConsoleAppender]::ColorMap[$entry.Severity.ToString()])
   }
 }
@@ -110,8 +117,6 @@ class FileAppender : LogAppender {
   hidden [StreamWriter]$_writer
   hidden [ValidateNotNullOrWhiteSpace()][string]$FilePath
   hidden [ReaderWriterLockSlim]$_lock = @{}
-  hidden [ValidateNotNullOrEmpty()][LogAppenderType]$_type = "File"
-
   FileAppender([string]$Path) {
     $p = [Logger]::GetUnResolvedPath($Path); $dir = Split-Path $p -Parent
     if (!(Test-Path $dir)) {
@@ -126,6 +131,11 @@ class FileAppender : LogAppender {
     # Open file for appending with UTF8 encoding
     $this._writer = [StreamWriter]::new($this.FilePath, $true, [Encoding]::UTF8)
     $this._writer.AutoFlush = $true # Flush after every write
+    $this.PsObject.Properties.Add([PSScriptProperty]::new('Type', [scriptblock]::Create("return [LogAppenderType]'File'"), {
+          throw [SetValueException]::new('"Type" is a ReadOnly property')
+        }
+      )
+    )
   }
   [void] Log([LogEntry]$entry) {
     [void]$this.IsSafetoLog($true)
@@ -178,8 +188,13 @@ class FileAppender : LogAppender {
 
 # Appender that writes log entries as JSON objects to a file
 class JsonAppender : FileAppender {
-  hidden [ValidateNotNullOrEmpty()][LogAppenderType]$_type = "JSON"
-  JsonAppender([string]$Path) : base($Path) {}
+  JsonAppender([string]$Path) : base($Path) {
+    $this.PsObject.Properties.Add([PSScriptProperty]::new('Type', [scriptblock]::Create("return [LogAppenderType]'JSON'"), {
+          throw [SetValueException]::new('"Type" is a ReadOnly property')
+        }
+      )
+    )
+  }
   [void] Log([LogEntry]$entry) {
     $this.IsSafetoLog($true)
     try {
@@ -201,8 +216,13 @@ class JsonAppender : FileAppender {
 }
 
 class XMLAppender : FileAppender {
-  hidden [ValidateNotNullOrEmpty()][LogAppenderType]$_type = "XML"
-  XMLAppender([string]$Path) : base($Path) {}
+  XMLAppender([string]$Path) : base($Path) {
+    $this.PsObject.Properties.Add([PSScriptProperty]::new('Type', [scriptblock]::Create("return [LogAppenderType]'XML'"), {
+          throw [SetValueException]::new('"Type" is a ReadOnly property')
+        }
+      )
+    )
+  }
   [LogEntry[]] ReadAllEntries() {
     return [XMLAppender]::ReadAllEntries($this.FilePath)
   }
@@ -253,8 +273,8 @@ class Logsession : IDisposable {
       )
     )
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogFiles', {
-          if ($this.LogAppenders.count -gt 0) {
-            $this.set_logfiles($this.LogAppenders.FilePath.Where({ $_ -notin $this._logFiles.ToArray().FullName }))
+          if ($this._logAppenders.count -gt 0) {
+            $this.set_logfiles($this._logAppenders.FilePath.Where({ $_ -notin $this._logFiles.ToArray().FullName }))
           }
           # Return a copy to prevent external modification of the internal list
           return $this._logFiles.ToArray()
@@ -272,6 +292,13 @@ class Logsession : IDisposable {
           } else {
             throw [ArgumentException]::new("LogType must be [LogEntry] or a Type that inherits from LogEntry. Provided: '$($value.FullName)'")
           }
+        }
+      )
+    )
+    $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogAppenders', {
+          return $this.GetAppenders()
+        }, {
+          throw [SetValueException]::new("LogAppenders is a ReadOnly Property")
         }
       )
     )
@@ -303,7 +330,7 @@ class Logsession : IDisposable {
     return $this.GetAppenders($type, -1)
   }
   [LogAppender[]] GetAppenders([LogAppenderType]$type, [int]$MinCount) {
-    $array = $this._logAppenders.Where({ $_._type -eq $type })
+    $array = $this._logAppenders.Where({ $_.Type -eq $type })
     if ($MinCount -ge 0 -and $array.count -gt $MinCount) {
       throw [InvalidOperationException]::new("Found more than one $type appender!")
     }
@@ -391,6 +418,15 @@ class Logsession : IDisposable {
   [void] Dispose() {
     if ($this.IsDisposed) { throw [ObjectDisposedException]::new($this.GetType().Name) }
     Write-Debug "[Logsession '$($this.Id)'] Disposing..."
+    foreach ($appender in $this._logAppenders) {
+      if ($appender -is [IDisposable]) {
+        try {
+          $appender.Dispose()
+        } catch {
+          throw [RuntimeException]::new("Error disposing appender '$($appender.GetType().Name)'", $_.Exception)
+        }
+      }
+    }
     [void][GC]::SuppressFinalize($this)
     $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a ReadOnly Property") }))
   }
@@ -405,46 +441,38 @@ class Logsession : IDisposable {
   }
 }
 
-
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidInvokingEmptyMembers', '')]
 class Logger : PsModuleBase, IDisposable {
-  [LogLevel] $MinLevel = 'INFO'
-  [Logsession] $Session = @{}
-
+  [ValidateNotNull()][LogLevel] $MinLevel
+  [ValidateNotNull()][Logsession] $Session = @{}
   Logger() {
-    [void][Logger]::From([ref]$this)
+    [void][Logger]::From([Logsession]::GetDataPath("Logs"), 'INFO', [ref]$this)
   }
-  static hidden [Logger] From([ref]$o) {
+  Logger([LogLevel]$MinLevel) {
+    [void][Logger]::From([Logsession]::GetDataPath("Logs"), 'INFO', [ref]$this)
+  }
+  Logger([string]$Logdirectory) {
+    [void][Logger]::From($Logdirectory, 'INFO', [ref]$this)
+  }
+  Logger([string]$Logdirectory, [LogLevel]$MinLevel) {
+    [void][Logger]::From($Logdirectory, $MinLevel, [ref]$this)
+  }
+  static [Logger] Create() { return [Logger]::new() }
+  static [Logger] Create([LogLevel]$MinLevel) { return [Logger]::new($MinLevel) }
+  static [Logger] Create([string]$Logdirectory) { return [Logger]::new($Logdirectory) }
+  static [Logger] Create([string]$Logdirectory, [LogLevel]$MinLevel) { return [Logger]::new($Logdirectory, $MinLevel) }
+
+  # Main factory method
+  static hidden [Logger] From([string]$Logdirectory, [LogLevel]$MinLevel, [ref]$o) {
     if ($null -eq $o) { throw [ArgumentException]::new("Empty PsReference for Logger object") };
+    if ([string]::IsNullOrWhiteSpace($Logdirectory)) { throw [ArgumentnullException]::new("Logdirectory") }
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('Logdir', { return $this.Session.Logdir }, { param($value) $this.Session.set_logdir($value) }))
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogFiles', { return $this.Session.LogFiles }, { throw [SetValueException]::new("LogFiles is a ReadOnly Property") }))
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogType', { return $this.Session.LogType }, { param($value) $this.Session.LogType = $value }))
-    $o.Value.Session.PsObject.Properties.Add([PSScriptProperty]::new('LogAppenders', { return $this.Session.GetAppenders() }, { throw [SetValueException]::new("LogAppenders is a ReadOnly Property") }))
+    $o.Value.Logdir = $Logdirectory
+    $o.Value.MinLevel = $MinLevel
     $o.Value.Session.Save()
     return $o.Value
-  }
-  [FileAppender[]] GetFileAppenders() {
-    return $this.Session.LogAppenders.Where({ $_.PsObject.TypeNames.Contains("FileAppender") })
-  }
-  [void] Log([LogEntry]$entry) {
-    if ($this.Session.LogAppenders.Count -lt 1) { $this.AddLogAppender([ConsoleAppender]::new()) }
-    foreach ($appender in $this.Session.LogAppenders) {
-      try {
-        $appender.Log($entry)
-      } catch {
-        throw $_.Exception
-      }
-    }
-  }
-  [void] Log([LogLevel]$severity, [string]$message) {
-    $this.Log($severity, $message, $null)
-  }
-  [void] Log([LogLevel]$severity, [string]$message, [Exception]$exception) {
-    if (!$this.IsEnabled($severity)) {
-      Write-Debug "[Logger] "$severity" loglevel is disabled. Skipped log message : $message"
-      return
-    }
-    $this.Log($this.CreateEntry($severity, $message, $exception))
   }
   static [Logsession[]] Getallsessions() {
     $f = [DirectoryInfo]::new([Logsession]::GetDataPath("config")).GetFiles("*-logger.json")
@@ -455,6 +483,9 @@ class Logger : PsModuleBase, IDisposable {
   }
   [FileAppender] GetFileAppender() {
     return $this.Session.GetAppenders('File', 1)[0]
+  }
+  [FileAppender[]] GetFileAppenders() {
+    return $this.Session.LogAppenders.Where({ $_.PsObject.TypeNames.Contains("FileAppender") })
   }
   [ConsoleAppender] GetConsoleAppender() {
     return $this.Session.GetAppenders('CONSOLE', 1)[0]
@@ -469,10 +500,10 @@ class Logger : PsModuleBase, IDisposable {
     $this.AddLogAppender([ConsoleAppender]::new())
   }
   [void] AddLogAppender([LogAppender]$LogAppender) {
-    if ($this.Session.LogAppenders.Count -gt 0) {
-      if ($this.Session.LogAppenders._name.Contains($LogAppender._name)) {
-        Write-Warning "$LogAppender is already added"
-        return
+    if ($this.Session._logAppenders.Count -gt 0) {
+      if ($this.Session._logAppenders._name.Contains($LogAppender._name)) {
+        throw [InvalidOperationException]::new("$LogAppender is already added")
+        # return
       }
     }
     $this.Session._logAppenders += $LogAppender
@@ -492,7 +523,7 @@ class Logger : PsModuleBase, IDisposable {
     return $this."$('Read' + $Type + 'Entries')"()
   }
   [LogEntry[]] ReadAllEntries([FileAppender]$appender) {
-    return $this.ReadAllEntries($appender._type)
+    return $this.ReadAllEntries($appender.Type)
   }
   [LogEntry[]] ReadJsonEntries() {
     if ($this.IsDisposed -and $this.LogFiles.Count -gt 0) {
@@ -508,23 +539,33 @@ class Logger : PsModuleBase, IDisposable {
     $files = $this.Logdir.EnumerateFiles()
     $files ? $files.ForEach({ Remove-Item $_.FullName -Force }) : $null
   }
-  [bool] IsEnabled([LogLevel]$level) {
+  [bool] ShouldLog([LogLevel]$level) {
     return $level -ge $this.MinLevel
   }
   [void] Dispose() {
     if ($this.IsDisposed) { return }
     [void][GC]::SuppressFinalize($this); $this.Session.Dispose()
-    # Dispose appenders that implement IDisposable
-    foreach ($appender in $this.Session.LogAppenders) {
-      if ($appender -is [IDisposable]) {
-        try {
-          $appender.Dispose()
-        } catch {
-          throw [RuntimeException]::new("Error disposing appender '$($appender.GetType().Name)'", $_.Exception)
-        }
+    $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a ReadOnly Property") }))
+  }
+  [void] Log([LogLevel]$severity, [string]$message) {
+    $this.Log($severity, $message, $null)
+  }
+  [void] Log([LogLevel]$severity, [string]$message, [Exception]$exception) {
+    if ($this.ShouldLog($severity)) {
+      $this.Log($this.CreateEntry($severity, $message, $exception))
+      return
+    }
+    Write-Debug -Message "[Logger] loglevel '$severity' is Skipped. Message : $message"
+  }
+  [void] Log([LogEntry]$entry) {
+    if ($this.Session._logAppenders.Count -lt 1) { $this.AddLogAppender([ConsoleAppender]::new()) }
+    foreach ($appender in $this.Session._logAppenders) {
+      try {
+        $appender.Log($entry)
+      } catch {
+        throw $_.Exception
       }
     }
-    $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a ReadOnly Property") }))
   }
   # --- Convenience Methods ---
   [void] Info([string]$message) { $this.Log([LogLevel]::INFO, $message) }
@@ -546,7 +587,7 @@ class Logger : PsModuleBase, IDisposable {
       MinLevel   = [string]$this.MinLevel
       LogFiles   = [string[]]$this.Session.LogFiles
       Logdir     = [string]$this.Session.Logdir
-      Appenders  = $this.Session.LogAppenders ? ([string[]]($this.Session.LogAppenders._type)) : @()
+      Appenders  = $this.Session.LogAppenders ? ([string[]]($this.Session.LogAppenders.Type)) : @()
     } | ConvertTo-Json
   }
 }
