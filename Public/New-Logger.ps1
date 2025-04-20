@@ -40,16 +40,18 @@ function New-Logger {
       $logger.Dispose()
     }
   #>
-  [CmdletBinding(SupportsShouldProcess = $false)][OutputType([Logger])][Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+  [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+  [CmdletBinding(SupportsShouldProcess = $false, DefaultParameterSetName = 'fa')]
+  [OutputType([Logger])]
   param(
     # The target directory for log files.
     [Parameter(Mandatory = $false, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
-    [Alias('Path', 'Logdir')]
-    [string]$Logdirectory = [IO.Path]::GetTempPath(),
+    [ValidateNotNullOrWhiteSpace()][Alias('Path', 'Logdir')]
+    [string]$Logdirectory,
 
-    # The base name for the default log file created by the FileAppender.
+    # The base name for the default logFile created by the FileAppender.
     [Parameter(Mandatory = $false)]
-    [Alias('fname')][ValidateNotNullOrWhiteSpace()]
+    [ValidateNotNullOrWhiteSpace()][Alias('fname', 'LogFile')]
     [string]$FileName = "log_$(Get-Date -Format 'yyyyMMdd-HHmmss')-$(New-Guid).log",
 
     # Sets the minimum severity level for messages to be processed by the logger.
@@ -65,18 +67,23 @@ function New-Logger {
     $ob = $null
   }
   Process {
+    # Create logger instance. The constructor will handle Logdirectory creation.
     try {
-      # Create logger instance. The constructor will handle Logdirectory creation.
-      $ob = [Logger]::new($Logdirectory)
-      $ob.MinLevel = $MinLevel
-      if ($appenders.count -gt 0) {
-        $appenders.ForEach({ $ob._appenders += $_ })
+      $ob = switch ($true) {
+        $($PSBoundParameters.ContainsKey('Logdirectory') -and $PSBoundParameters.ContainsKey('MinLevel')) { [Logger]::Create($Logdirectory, $MinLevel) ; break }
+        $($PSBoundParameters.ContainsKey('Logdirectory') -and !$PSBoundParameters.ContainsKey('MinLevel')) { [Logger]::Create($Logdirectory) ; break }
+        $(!$PSBoundParameters.ContainsKey('Logdirectory') -and $PSBoundParameters.ContainsKey('MinLevel')) { [Logger]::Create($MinLevel) ; break }
+        default {
+          [Logger]::Create()
+        }
       }
       $logFilePath = [IO.Path]::Combine($Logdirectory, $FileName)
       if (![IO.File]::Exists($logFilePath)) { New-Item -Path $logFilePath -ItemType File -Force | Out-Null }
-      $ob._appenders += [FileAppender]::new($logFilePath)
+      $ob.AddLogAppender([FileAppender]::new($logFilePath))
+
+      if ($appenders.count -gt 0) { $appenders.ForEach({ $ob.AddLogAppender($_) }) }
       Write-Debug "[Logger] Added FileAppender for path '$logFilePath'."
-      Write-Debug "[Logger] created with MinLevel '$MinLevel' and Logdirectory '$($ob.Logdirectory)'."
+      Write-Debug "[Logger] created with MinLevel '$MinLevel' and Logdirectory '$($ob.Logdir)'."
     } catch {
       $PSCmdlet.ThrowTerminatingError([System.Management.Automation.ErrorRecord]::new(
           $_.Exception, "FAILED_TO_CREATE_LOGGER", [System.Management.Automation.ErrorCategory]::InvalidOperation,
