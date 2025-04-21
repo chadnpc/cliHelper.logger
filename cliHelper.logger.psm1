@@ -1,6 +1,7 @@
 ﻿#!/usr/bin/env pwsh
 using namespace System.IO
 using namespace System.Text
+using namespace System.Linq
 using namespace System.Threading
 using namespace System.Collections
 using namespace System.Collections.Generic
@@ -240,22 +241,26 @@ class XMLAppender : FileAppender {
   }
 }
 
-class LogFiles : ReadOnlySet[FileInfo] {
-  LogFiles([FileInfo[]]$files) : base($this.new_set($files)) {}
-  hidden [ISet[FileInfo]] new_set([FileInfo[]]$files) {
-    $hs = [HashSet[FileInfo]]::new()
-    $files | Sort-Object -Unique NameString | ForEach-Object {
-      $hs.Add($_)
-    }
+class LogFiles : System.Collections.Generic.HashSet[IO.FileInfo] {
+  LogFiles([IO.FileInfo[]]$files) {
+    $files.ForEach({ $this.Add($_) })
+  }
+  [string[]] ToString() {
+    return $this.FullName
+  }
+}
+
+class LogEntries : ReadOnlySet[LogEntry] {
+  # props..
+  LogEntries([LogEntry[]]$e) : base($this.new_set($e)) {}
+  hidden [ISet[LogEntry]] new_set([LogEntry[]]$e) {
+    $hs = [HashSet[LogEntry]]::new(); $e.ForEach({ $hs.Add($_) })
     return $hs
   }
   [ArrayList] ToArray() {
     $l = [ArrayList]::new()
     $this.FullName.ForEach({ [void]$l.Add($_) })
     return $l
-  }
-  [string[]] ToString() {
-    return $this.FullName
   }
 }
 
@@ -644,7 +649,7 @@ class NullLogger : Logger {
 
 $typestoExport = @(
   [Logger], [LogEntry], [LogAppender], [LogLevel], [ConsoleAppender], [Logsession],
-  [JsonAppender], [LogFiles], [XMLAppender], [LogAppenderType], [FileAppender], [NullLogger]
+  [JsonAppender], [LogFiles], [LogEntries], [XMLAppender], [LogAppenderType], [FileAppender], [NullLogger]
 )
 # Register Type Accelerators
 $TypeAcceleratorsClass = [PsObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')
