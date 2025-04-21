@@ -11,6 +11,6 @@
   )
 
   process {
-    return $Logger.ReadAllEntries($Type)
+    return $Logger.ReadEntries($Type)
   }
 }
