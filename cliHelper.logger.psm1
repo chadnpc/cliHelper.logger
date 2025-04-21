@@ -259,17 +259,6 @@ class LogFiles : ReadOnlySet[FileInfo] {
   }
 }
 
-class LogAppenders : ReadOnlySet[LogAppender] {
-  LogAppenders([LogAppender[]]$appenders) : base($this.new_set($appenders)) {}
-  hidden [ISet[LogAppender]] new_set([LogAppender[]]$appenders) {
-    $hs = [HashSet[LogAppender]]::new()
-    $appenders | Sort-Object -Unique _name | ForEach-Object {
-      $hs.Add($_)
-    }
-    return $hs
-  }
-}
-
 class Logsession : IDisposable {
   [ValidateNotNull()][ConfigFile] $File                     # Handles the config file persistence
   hidden [ValidateNotNull()][List[FileInfo]] $_logFiles     # Paths of associated log files created in this session
@@ -310,12 +299,12 @@ class Logsession : IDisposable {
     )
     $o.Value.PsObject.Properties.Add([PSScriptProperty]::new('LogFiles', {
           if ($this._logAppenders.count -gt 0) {
-            $this.set_logfiles($this._logAppenders.FilePath.Where({ $_ -notin $this._logFiles.ToArray().FullName }))
+            $this.add_logfiles($this._logAppenders.FilePath.Where({ $_ -notin $this._logFiles.ToArray().FullName }))
           }
           # Return a copy to prevent external modification of the internal list
           return $this._logFiles.ToArray()
         }, {
-          param([string[]]$values) $this.set_logfiles($values)
+          param([string[]]$values) $this.add_logfiles($values)
         }
       )
     )
@@ -351,7 +340,7 @@ class Logsession : IDisposable {
     $o.Value.Logdir = $configFile.Directory
     $o.Value.Logdir = $i.Logdir ? $i.Logdir : $o.Value.get_datapath("Logs")
     $o.Value.LogType = $i.LogType ? $i.LogType : [LogEntry]
-    $i.LogFiles ? $i.LogFiles.ForEach({ $o.Value.add_logfile($_) }) : $null
+    $i.LogFiles ? $o.Value.add_logfiles($i.LogFiles) : $null
     return $o.Value
   }
   [LogAppender[]] GetAppenders() {
@@ -391,16 +380,11 @@ class Logsession : IDisposable {
   static [DirectoryInfo] GetDataPath([string]$subdirName) {
     return [PsModuleBase]::GetDataPath("cliHelper.logger", $subdirName)
   }
-  hidden [void] set_logfiles([string[]]$files) {
-    if ($files.Count -gt 0) { $files.ForEach({ $this.add_logfile($_) }) }
-  }
-  hidden [void] add_logfile([string]$filePath) {
-    $path = [PsModuleBase]::GetUnResolvedPath($filePath)
-    $f = [IO.FileInfo]::new($path)
-    $this._logFiles = ($null -ne $this._logFiles) ? $this._logFiles : [List[IO.FileInfo]]::new()
-    if (!$this._logFiles.Contains($f)) {
-      [void]$this._logFiles.Add($f)
-      Write-Debug "[Logsession '$($this.Id)'] Added log file: $f"
+  hidden [void] add_logfiles([string[]]$files) {
+    # ? $this._logFiles.ToString() -contains $_.FullName
+    [string[]]$logfiles = ($files | Select-Object @{l = 'Path'; e = { [PsModuleBase]::GetUnResolvedPath($_) } }).Path + $this._logFiles.ToString() | Sort-Object -Unique
+    if ($logfiles.Count -gt 0) {
+      $this._logFiles = [LogFiles]::new($logfiles.ForEach({ [FileInfo]::new($_) }))
     }
   }
   hidden [void] set_logdir([string]$value) {
@@ -660,7 +644,7 @@ class NullLogger : Logger {
 
 $typestoExport = @(
   [Logger], [LogEntry], [LogAppender], [LogLevel], [ConsoleAppender], [Logsession],
-  [JsonAppender], [LogFiles], [LogAppenders], [XMLAppender], [LogAppenderType], [FileAppender], [NullLogger]
+  [JsonAppender], [LogFiles], [XMLAppender], [LogAppenderType], [FileAppender], [NullLogger]
 )
 # Register Type Accelerators
 $TypeAcceleratorsClass = [PsObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')
