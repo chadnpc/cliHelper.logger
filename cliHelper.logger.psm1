@@ -449,7 +449,7 @@ class Logger : PsModuleBase, IDisposable {
     [void][Logger]::From([Logsession]::GetDataPath("Logs"), 'INFO', [ref]$this)
   }
   Logger([LogLevel]$MinLevel) {
-    [void][Logger]::From([Logsession]::GetDataPath("Logs"), 'INFO', [ref]$this)
+    [void][Logger]::From([Logsession]::GetDataPath("Logs"), $MinLevel, [ref]$this)
   }
   Logger([string]$Logdirectory) {
     [void][Logger]::From($Logdirectory, 'INFO', [ref]$this)
