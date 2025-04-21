@@ -55,7 +55,6 @@ function New-Logger {
     [string]$FileName = "log_$(Get-Date -Format 'yyyyMMdd-HHmmss')-$(New-Guid).log",
 
     # Sets the minimum severity level for messages to be processed by the logger.
-    # Defaults to 'Info'. Valid values are from the LogLevel enum (Debug, Info, Warn, Error, Fatal).
     [Parameter(Mandatory = $false)]
     [Alias('Level')]
     [LogLevel]$MinLevel = 'INFO',
@@ -69,15 +68,8 @@ function New-Logger {
   Process {
     # Create logger instance. The constructor will handle Logdirectory creation.
     try {
-      $ob = switch ($true) {
-        $($PSBoundParameters.ContainsKey('Logdirectory') -and $PSBoundParameters.ContainsKey('MinLevel')) { [Logger]::Create($Logdirectory, $MinLevel) ; break }
-        $($PSBoundParameters.ContainsKey('Logdirectory') -and !$PSBoundParameters.ContainsKey('MinLevel')) { [Logger]::Create($Logdirectory) ; break }
-        $(!$PSBoundParameters.ContainsKey('Logdirectory') -and $PSBoundParameters.ContainsKey('MinLevel')) { [Logger]::Create($MinLevel) ; break }
-        default {
-          [Logger]::Create()
-        }
-      }
-      $logFilePath = [IO.Path]::Combine($Logdirectory, $FileName)
+      $ob = $Logdirectory ? [Logger]::Create($Logdirectory, $MinLevel) : [Logger]::Create($MinLevel)
+      $logFilePath = [IO.Path]::Combine($ob.Logdir, $FileName)
       if (![IO.File]::Exists($logFilePath)) { New-Item -Path $logFilePath -ItemType File -Force | Out-Null }
       $ob.AddLogAppender([FileAppender]::new($logFilePath))
 
