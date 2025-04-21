@@ -62,9 +62,6 @@ function New-Logger {
     # has Console appender by default
     [LogAppender[]]$appenders = @([ConsoleAppender]::new())
   )
-  begin {
-    $ob = $null
-  }
   Process {
     # Create logger instance. The constructor will handle Logdirectory creation.
     try {
