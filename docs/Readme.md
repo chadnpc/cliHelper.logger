@@ -40,18 +40,18 @@
     $logger.MinLevel = [LogLevel]::Debug
 
     # Create and add appenders manually
-    $logger.AddLogAppender([ConsoleAppender]::new())
-    $logger.AddLogAppender([FileAppender]::new((Join-Path $Logdir "mytool.log")))
-    $logger.AddLogAppender([JsonAppender]::new((Join-Path $Logdir "mytool_metrics.json")))
+    $logger.AddLogAppender([ConsoleAppender]@{})
+    $logger.AddLogAppender([FileAppender]"$Logdir/mytool.log")
+    $logger.AddLogAppender([JsonAppender]"$Logdir/mytool_metrics.json")
 
-    $logger.Info("Object Logger Initialized. with $($logger._appenders.Count) appenders.")
+    $logger.Info("Object Logger Initialized. with $($logger.Session.LogAppenders.Count) appenders.")
     $logger.Debug("Detailed trace message.")
     # simulated failure:
     throw [System.IO.FileNotFoundException]::new("Required config file missing", "config.xml")
   } catch {
     $logger.Fatal(("{0} :`n  {1}" -f $_.FullyQualifiedErrorId, $_.ScriptStackTrace), $_.Exception)
   } finally {
-    $logger.Info("Check logs in '$Logdir/mytool.log' and '$Logdir/mytool_metrics.json'")
+    $logger.Info("Check logs in $($logger.LogFiles)")
     $logger.Dispose()
   }
   ```
