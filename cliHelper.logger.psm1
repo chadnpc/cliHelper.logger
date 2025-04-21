@@ -110,6 +110,10 @@ class ConsoleAppender : LogAppender {
     $this.IsSafetoLog($true)
     Write-Host $this.GetlogLine($entry) -f ([ConsoleAppender]::ColorMap[$entry.Severity.ToString()])
   }
+  [LogEntry[]] ReadEntries() {
+    Write-Warning "There is no implementation to record or read previous console entries!"
+    return @()
+  }
 }
 
 # Appender that writes formatted text logs to a file
@@ -160,12 +164,11 @@ class FileAppender : LogAppender {
       $this._lock.ExitWriteLock()
     }
   }
-  [LogEntry[]] ReadAllEntries() {
-    return [FileAppender]::ReadAllEntries($this.FilePath)
+  [LogEntry[]] ReadEntries() {
+    return [FileAppender]::ReadEntries($this.FilePath)
   }
-  static [LogEntry[]] ReadAllEntries([string]$FilePath) {
-    # todo: add implementation to read a .log file
-    return @()
+  static [LogEntry[]] ReadEntries([string]$FilePath) {
+    throw [PSNotImplementedException]::new("there is no implementation to read a .log files")
   }
   [void] Dispose() {
     if ($this.IsDisposed) { return }
@@ -204,10 +207,10 @@ class JsonAppender : FileAppender {
       throw [RuntimeException]::new("JsonAppender failed to write to '$($this.FilePath)'", $_.Exception)
     }
   }
-  [LogEntry[]] ReadAllEntries() {
-    return [JsonAppender]::ReadAllEntries($this.FilePath)
+  [LogEntry[]] ReadEntries() {
+    return [JsonAppender]::ReadEntries($this.FilePath)
   }
-  static [LogEntry[]] ReadAllEntries([string]$FilePath) {
+  static [LogEntry[]] ReadEntries([string]$FilePath) {
     if ([File]::Exists($FilePath)) {
       return '[{0}]' -f ([File]::ReadAllText($FilePath)) | ConvertFrom-Json
     }
@@ -223,12 +226,13 @@ class XMLAppender : FileAppender {
       )
     )
   }
-  [LogEntry[]] ReadAllEntries() {
-    return [XMLAppender]::ReadAllEntries($this.FilePath)
+  [LogEntry[]] ReadEntries() {
+    return [XMLAppender]::ReadEntries($this.FilePath)
   }
-  static [LogEntry[]] ReadAllEntries([string]$FilePath) {
+  static [LogEntry[]] ReadEntries([string]$FilePath) {
     if ([File]::Exists($FilePath)) {
       return [File]::ReadAllText($FilePath) | ConvertFrom-CliXml
+      # todo: try using [PSSerializer]::Deserialize($text)
     }
     return @()
   }
@@ -475,7 +479,7 @@ class Logger : PsModuleBase, IDisposable {
     return $o.Value
   }
   static [Logsession[]] Getallsessions() {
-    $f = [DirectoryInfo]::new([Logsession]::GetDataPath("config")).GetFiles("*-logger.json")
+    $f = [DirectoryInfo]::new([Logsession]::GetDataPath("config")).GetFiles("*-config.json")
     $i = @(); if ($f.Count -gt 0) {
       $f.ForEach({ $i += ConvertFrom-Json([File]::ReadAllText($_)) })
     }
@@ -517,23 +521,39 @@ class Logger : PsModuleBase, IDisposable {
     }
     return $this.LogType::New($severity, $message, $exception)
   }
-  [LogEntry[]] ReadAllEntries([LogAppenderType]$type) {
+  [LogEntry[]] ReadEntries([string]$type) {
+    return $this.ReadEntries(@{ type = $type })
+  }
+  [LogEntry[]] ReadEntries([FileInfo]$file) {
+    return $this.ReadEntries(@{type = $file.Extension.Substring(1).ToUpper() }, $file)
+  }
+  [LogEntry[]] ReadEntries([FileAppender]$appender) {
+    return $this.ReadEntries($appender.Type)
+  }
+  [LogEntry[]] ReadEntries([hashtable]$options) {
+    $t = $options["type"]; [ValidateNotNullOrWhiteSpace()][string]$t = $t
+    return $this.ReadEntries([LogAppenderType]$t)
+    # or
+    # if ($this.LogFiles.Count -gt 0) {
+    #   return $this.LogFiles.Where({ $_.Extension -eq ".$t" }).ForEach({ $this."$('Read' + $t + 'Entries')"($_) })
+    # }
+  }
+  [LogEntry[]] ReadEntries([hashtable]$options, [FileInfo]$file) {
+    $t = $options["type"]; [ValidateNotNullOrWhiteSpace()][string]$t = $t
+    return $this.ReadEntries([LogAppenderType]$t, $file)
+  }
+  [LogEntry[]] ReadEntries([LogAppenderType]$type) {
+    return $this.ReadEntries($type, $false)
+  }
+  [LogEntry[]] ReadEntries([LogAppenderType]$type, [bool]$throwonError) {
     $a = $this."$('Get' + $Type + 'Appender')"()
-    if ($null -ne $a) { return $a.ReadAllEntries() }
-    return $this."$('Read' + $Type + 'Entries')"()
+    if ($null -ne $a) { return $a.ReadEntries() }
+    if ($throwonError) { throw "no $Type entries were found" }
+    return @()
   }
-  [LogEntry[]] ReadAllEntries([FileAppender]$appender) {
-    return $this.ReadAllEntries($appender.Type)
-  }
-  [LogEntry[]] ReadJsonEntries() {
-    if ($this.IsDisposed -and $this.LogFiles.Count -gt 0) {
-      return $this.LogFiles.Where({ $_.Extension -eq ".json" }).ForEach({ $this.ReadJsonEntries($_) })
-    }
-    $a = $this.GetJsonAppender()
-    return $a ? [JsonAppender]::ReadAllEntries($a.FilePath) : @()
-  }
-  [LogEntry[]] ReadJsonEntries([FileInfo]$files) {
-    return ($files | Select-Object @{l = 'entries'; e = { [JsonAppender]::ReadAllEntries($_) } }).entries
+  [LogEntry[]] ReadEntries([LogAppenderType]$type, [FileInfo]$file) {
+    $n = $type.ToString() + 'Appender'; $a = $this."$('Get' + $n)"()
+    return $a ? ([type]$n)::ReadEntries($a.FilePath) : @()
   }
   [void] ClearLogdir() {
     $files = $this.Logdir.EnumerateFiles()
@@ -543,7 +563,7 @@ class Logger : PsModuleBase, IDisposable {
     return $level -ge $this.MinLevel
   }
   [void] Dispose() {
-    if ($this.IsDisposed) { return }
+    if ($this.IsDisposed) { throw [ObjectDisposedException]::new($this.GetType().Name, "Object is already disposed!") }
     [void][GC]::SuppressFinalize($this); $this.Session.Dispose()
     $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a ReadOnly Property") }))
   }
