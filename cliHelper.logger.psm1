@@ -2,9 +2,11 @@
 using namespace System.IO
 using namespace System.Text
 using namespace System.Threading
+using namespace System.Collections
 using namespace System.Collections.Generic
 using namespace System.Management.Automation
 using namespace System.Collections.Concurrent
+using namespace System.Collections.ObjectModel
 
 #Requires -Psedition Core
 #Requires -Modules PsModuleBase
@@ -238,6 +240,36 @@ class XMLAppender : FileAppender {
   }
 }
 
+class LogFiles : ReadOnlySet[FileInfo] {
+  LogFiles([FileInfo[]]$files) : base($this.new_set($files)) {}
+  hidden [ISet[FileInfo]] new_set([FileInfo[]]$files) {
+    $hs = [HashSet[FileInfo]]::new()
+    $files | Sort-Object -Unique NameString | ForEach-Object {
+      $hs.Add($_)
+    }
+    return $hs
+  }
+  [ArrayList] ToArray() {
+    $l = [ArrayList]::new()
+    $this.FullName.ForEach({ [void]$l.Add($_) })
+    return $l
+  }
+  [string[]] ToString() {
+    return $this.FullName
+  }
+}
+
+class LogAppenders : ReadOnlySet[LogAppender] {
+  LogAppenders([LogAppender[]]$appenders) : base($this.new_set($appenders)) {}
+  hidden [ISet[LogAppender]] new_set([LogAppender[]]$appenders) {
+    $hs = [HashSet[LogAppender]]::new()
+    $appenders | Sort-Object -Unique _name | ForEach-Object {
+      $hs.Add($_)
+    }
+    return $hs
+  }
+}
+
 class Logsession : IDisposable {
   [ValidateNotNull()][ConfigFile] $File                     # Handles the config file persistence
   hidden [ValidateNotNull()][List[FileInfo]] $_logFiles     # Paths of associated log files created in this session
@@ -378,7 +410,7 @@ class Logsession : IDisposable {
     }
     if (![Directory]::Exists($dir)) {
       try {
-        Write-Verbose "[Logsession '$($this.Id)'] Creating log directory: '$dir'"
+        Write-Verbose "[Logsession '$($this.Id)'] created. Saving logs to '$dir'"
         [void][PsModuleBase]::CreateFolder($dir)
       } catch {
         throw [IOException]::new("Failed to create log directory '$dir'.", $_.Exception)
@@ -628,7 +660,7 @@ class NullLogger : Logger {
 
 $typestoExport = @(
   [Logger], [LogEntry], [LogAppender], [LogLevel], [ConsoleAppender], [Logsession],
-  [JsonAppender], [XMLAppender], [LogAppenderType], [FileAppender], [NullLogger]
+  [JsonAppender], [LogFiles], [LogAppenders], [XMLAppender], [LogAppenderType], [FileAppender], [NullLogger]
 )
 # Register Type Accelerators
 $TypeAcceleratorsClass = [PsObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')
