@@ -70,6 +70,12 @@ class LogEntries : PsReadOnlySet {
     }
     return $this.ToSortedList($PropertyName, $descending).Values
   }
+  [LogEntry[]] ToArray() {
+    return $this.GetEnumerator() | Select-Object
+  }
+  [string[]] ToString() {
+    return $this.GetEnumerator().ForEach({ "[{0:u}] [{1,-5}] {2}" -f $_.Timestamp, $_.Severity.ToString().Trim().ToUpper(), $_.Message })
+  }
 }
 
 class LogAppender : IDisposable {
@@ -80,13 +86,23 @@ class LogAppender : IDisposable {
   }
   [string] GetlogLine([LogEntry]$entry) {
     [ValidateNotNull()][LogEntry] $entry = $entry
-    $logb = $entry.ToHashtable(); $tn = $this.GetType().Name.Replace("Appender", "").ToUpper()
+    $logb = $entry.ToHashtable(); $atype = $this.GetType().Name.Replace("Appender", "").ToUpper()
+    $logb.Exception = $logb.Exception -eq "System.Exception" ? [String]::Empty : $logb.Exception
     $line = switch ($true) {
-      ($tn -eq "JSON") { ($logb | ConvertTo-Json -Compress -Depth 5) + ','; break }
-      ($tn -in ("CONSOLE", "FILE")) { "[{0:u}] [{1,-5}] {2}" -f $logb.Timestamp, $logb.Severity.ToString().Trim().ToUpper(), $logb.Message; break }
-      ($tn -eq "XML") { $logb | ConvertTo-CliXml -Depth 5; break }
+      ($atype -eq "JSON") { ($logb | ConvertTo-Json -Compress -Depth 5) + ','; break }
+      ($atype -in ("CONSOLE", "FILE")) {
+        $l = "[{0:u}] [{1,-5}] {2}" -f $logb.Timestamp, $logb.Severity.ToString().Trim().ToUpper(), $logb.Message;
+        if (![string]::IsNullOrWhiteSpace($logb.Exception)) {
+          # Append exception on new lines, indented for readability
+          $e = ($entry.Exception.ToString() -split '\r?\n' | ForEach-Object { "  $_" }) -join "`n"
+          $l += "`n$e"
+        }
+        $l;
+        break
+      }
+      ($atype -eq "XML") { $logb | ConvertTo-CliXml -Depth 5; break }
       default {
-        throw [InvalidOperationException]::new("BUG: LogAppenderType of value '$tn' was not expected!")
+        throw [InvalidOperationException]::new("BUG: LogAppenderType of value '$atype' was not expected!")
       }
     }
     return $line
@@ -164,12 +180,6 @@ class FileAppender : LogAppender {
   [void] Log([LogEntry]$entry) {
     [void]$this.IsSafetoLog($true)
     $logLine = $this.GetlogLine($entry)
-    # Add exception info if present
-    if ($null -ne $entry.Exception) {
-      # Append exception on new lines, indented for readability
-      $exceptionText = ($entry.Exception.ToString() -split '\r?\n' | ForEach-Object { "  $_" }) -join "`n"
-      $logLine += "`n$($exceptionText)"
-    }
     # Acquire write lock
     $this._lock.EnterWriteLock()
     try {
@@ -232,9 +242,10 @@ class JsonAppender : FileAppender {
   }
   static [LogEntries] ReadEntries([string]$FilePath) {
     if ([File]::Exists($FilePath)) {
-      return '[{0}]' -f ([File]::ReadAllText($FilePath)) | ConvertFrom-Json
+      $array = '[{0}]' -f ([File]::ReadAllText($FilePath)) | ConvertFrom-Json
+      return [LogEntries]::new($array)
     }
-    return [LogEntries]::Empty
+    return @{}
   }
 }
 
@@ -251,10 +262,11 @@ class XMLAppender : FileAppender {
   }
   static [LogEntries] ReadEntries([string]$FilePath) {
     if ([File]::Exists($FilePath)) {
-      return [File]::ReadAllText($FilePath) | ConvertFrom-CliXml
       # todo: try using [PSSerializer]::Deserialize($text)
+      $array = [File]::ReadAllText($FilePath) | ConvertFrom-CliXml
+      return [LogEntries]::new($array)
     }
-    return [LogEntries]::Empty
+    return @{}
   }
 }
 
@@ -371,7 +383,7 @@ class Logsession : IDisposable {
         if ($null -ne $a) { $array += $a }
       }
     )
-    return $array
+    return [LogAppenders]::new($array)
   }
   [LogAppenders] GetAppenders([LogAppenderType]$type) {
     return $this.GetAppenders($type, -1)
@@ -379,9 +391,9 @@ class Logsession : IDisposable {
   [LogAppenders] GetAppenders([LogAppenderType]$type, [int]$MinCount) {
     $array = $this._logAppenders.Where({ $_.Type -eq $type })
     if ($MinCount -ge 0 -and $array.count -gt $MinCount) {
-      throw [InvalidOperationException]::new("Found more than one $type appender!")
+      throw [InvalidOperationException]::new("Can not have more than $MinCount '$type' appender type in the same session!")
     }
-    return $array
+    return [LogAppenders]::new($array)
   }
   [void] Save() {
     if ($this.IsDisposed) { throw [ObjectDisposedException]::new($this.GetType().Name) }
@@ -392,7 +404,7 @@ class Logsession : IDisposable {
       $this.File.Save($jsonContent)
       Write-Debug "[Logsession '$($this.Id)'] Saved successfully."
     } catch {
-      throw [System.IO.IOException]::new("Failed to save session file '$($this.File.FullName)'.", $_.Exception)
+      throw [IOException]::new("Failed to save session file '$($this.File.FullName)'.", $_.Exception)
     }
   }
   static hidden [Logsession] From([string]$SessionId, [string]$Logdir, [ref]$o) {
@@ -474,8 +486,9 @@ class Logsession : IDisposable {
         }
       }
     }
-    [void][GC]::SuppressFinalize($this)
+    # overwrite the property:
     $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a ReadOnly Property") }))
+    [void][GC]::SuppressFinalize($this)
   }
   [string] ToString() {
     $str = "[LogSession]@{0}" -f (ConvertTo-Json(@{
@@ -529,19 +542,19 @@ class Logger : PsModuleBase, IDisposable {
     return $i
   }
   [FileAppender] GetFileAppender() {
-    return $this.Session.GetAppenders('File', 1)[0]
+    return $this.Session.GetAppenders('File', 1).ToArray()[0]
   }
   [FileAppender[]] GetFileAppenders() {
     return $this.Session.LogAppenders.Where({ $_.PsObject.TypeNames.Contains("FileAppender") })
   }
   [ConsoleAppender] GetConsoleAppender() {
-    return $this.Session.GetAppenders('CONSOLE', 1)[0]
+    return $this.Session.GetAppenders('CONSOLE', 1).ToArray()[0]
   }
   [XMLAppender] GetXMLAppender() {
-    return $this.Session.GetAppenders("JSON", 1)[0]
+    return $this.Session.GetAppenders("JSON", 1).ToArray()[0]
   }
   [JsonAppender] GetJsonAppender() {
-    return $this.Session.GetAppenders("JSON", 1)[0]
+    return $this.Session.GetAppenders("JSON", 1).ToArray()[0]
   }
   [void] AddLogAppender() {
     $this.AddLogAppender([ConsoleAppender]::new())
@@ -593,11 +606,11 @@ class Logger : PsModuleBase, IDisposable {
     $a = $this."$('Get' + $Type + 'Appender')"()
     if ($null -ne $a) { return $a.ReadEntries() }
     if ($throwonError) { throw "no $Type entries were found" }
-    return [LogEntries]::Empty
+    return @{}
   }
   [LogEntries] ReadEntries([LogAppenderType]$type, [FileInfo]$file) {
     $n = $type.ToString() + 'Appender'; $a = $this."$('Get' + $n)"()
-    return $a ? ([type]$n)::ReadEntries($a.FilePath) : [LogEntries]::Empty
+    return $a ? ([type]$n)::ReadEntries($a.FilePath) : @{}
   }
   [void] ClearLogdir() {
     $files = $this.Logdir.EnumerateFiles()
