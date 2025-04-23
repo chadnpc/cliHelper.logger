@@ -509,6 +509,7 @@ class Logsession : IDisposable {
 class Logger : PsModuleBase, IDisposable {
   [ValidateNotNull()][LogLevel] $MinLevel
   [ValidateNotNull()][Logsession] $Session = @{}
+  static [AllowNull()][Logger] $Default
   Logger() {
     [void][Logger]::From([Logsession]::GetDataPath("Logs"), 'INFO', [ref]$this)
   }
@@ -573,10 +574,10 @@ class Logger : PsModuleBase, IDisposable {
     [LogAppender[]]$a = $this.Session._logAppenders.ToArray() + $LogAppender
     $this.Session._logAppenders = [LogAppenders]::new($a)
   }
-  [LogEntry] CreateEntry([LogLevel]$severity, [string]$message) {
-    return $this.CreateEntry($severity, $message, $null)
+  [LogEntry] CreateLogEntry([LogLevel]$severity, [string]$message) {
+    return $this.CreateLogEntry($severity, $message, $null)
   }
-  [LogEntry] CreateEntry([LogLevel]$severity, [string]$message, [Exception]$exception) {
+  [LogEntry] CreateLogEntry([LogLevel]$severity, [string]$message, [Exception]$exception) {
     if ($null -ne ($this.LogType | Get-Member -MemberType Method -Static -Name Create)) {
       return $this.LogType::Create($severity, $message, $exception)
     }
@@ -625,18 +626,8 @@ class Logger : PsModuleBase, IDisposable {
   }
   [void] Dispose() {
     if ($this.IsDisposed) { throw [ObjectDisposedException]::new($this.GetType().Name, "Object is already disposed!") }
-    [void][GC]::SuppressFinalize($this); $this.Session.Dispose()
+    [void][GC]::SuppressFinalize($this); $this.Session.Dispose(); [Logger]::Default = $null
     $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a ReadOnly Property") }))
-  }
-  [void] Log([LogLevel]$severity, [string]$message) {
-    $this.Log($severity, $message, $null)
-  }
-  [void] Log([LogLevel]$severity, [string]$message, [Exception]$exception) {
-    if ($this.ShouldLog($severity)) {
-      $this.Log($this.CreateEntry($severity, $message, $exception))
-      return
-    }
-    Write-Debug -Message "[Logger] loglevel '$severity' is Skipped. Message : $message"
   }
   [void] Log([LogEntry]$entry) {
     if ($this.Session._logAppenders.Count -lt 1) { $this.AddLogAppender([ConsoleAppender]::new()) }
@@ -647,6 +638,16 @@ class Logger : PsModuleBase, IDisposable {
         throw $_.Exception
       }
     }
+  }
+  [void] Log([LogLevel]$severity, [string]$message) {
+    $this.Log($severity, $message, $null)
+  }
+  [void] Log([LogLevel]$severity, [string]$message, [Exception]$exception) {
+    if ($this.ShouldLog($severity)) {
+      $this.Log($this.CreateLogEntry($severity, $message, $exception))
+      return
+    }
+    Write-Debug -Message "[Logger] loglevel '$severity' is Skipped. Message : $message"
   }
   # --- Convenience Methods ---
   [void] Info([string]$message) { $this.Log([LogLevel]::INFO, $message) }
@@ -660,16 +661,28 @@ class Logger : PsModuleBase, IDisposable {
   [void] Fatal([string]$message) { $this.Fatal($message, $null) }
   [void] Fatal([string]$message, [Exception]$exception = $null) { $this.Log([LogLevel]::FATAL, $message, $exception) }
 
-  [string] ToString() {
+  [hashtable] ToHashtable() {
     return @{
-      Session    = $this.Session
-      IsDisposed = [bool]$this.IsDisposed
-      LogType    = [string]$this.Session.GetLogType()
+      Session    = $this.Session.ToHashtable()
+      Logdir     = [string]$this.Session.Logdir
+      LogType    = [string]$this.Session.LogType
       MinLevel   = [string]$this.MinLevel
       LogFiles   = [string[]]$this.Session.LogFiles
-      Logdir     = [string]$this.Session.Logdir
-      Appenders  = $this.Session.LogAppenders ? ([string[]]($this.Session.LogAppenders.Type)) : @()
-    } | ConvertTo-Json
+      Appenders  = [string[]]($this.Session.LogAppenders ? ($this.Session.LogAppenders.Type) : @())
+      IsDisposed = [bool]$this.IsDisposed
+    }
+  }
+  [string] ToJson() {
+    return $this.ToHashtable() | ConvertTo-Json -Depth 3
+  }
+  [string] ToString() {
+    $str = "[Logger]@{0}" -f (ConvertTo-Json(@{
+          MinLevel = [string]$this.MinLevel
+          Logdir   = [string]$this.Logdir
+        }
+      )
+    )
+    return [string]::Join('', $str.Replace(':', '=').Split("`n").Trim()).Replace(',"', '; "')
   }
 }
 
