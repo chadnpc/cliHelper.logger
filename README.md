@@ -21,7 +21,7 @@ Import-Module cliHelper.logger
 # 1. Create a logger instance with Console and File appenders (defaults)
 $logger = New-Logger -Level Debug
 
-<# Anything below debug level won't be logged. see:
+<# Anything below debug level (0) won't be logged. see:
 [LogLevel[]][Enum]::GetNames[LogLevel]() | % {
   [PsCustomObject]@{ Name = $_ ; value = $_.value__ }
 }
@@ -50,8 +50,9 @@ try {
   Write-LogEntry -l $logger -level Warn -Message "Operation completed with warnings."
   Write-Host "Check logs in $logPath"
 } finally {
+  $logger.ReadEntries(@{ type = "json" })
   # 2. IMPORTANT: Dispose the logger to flush buffers and release file handles
-  $logger.Dispose()
+  # $logger.Dispose()
 }
 ```
 
