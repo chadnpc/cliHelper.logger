@@ -22,6 +22,7 @@ Import-Module cliHelper.logger
 $demo = [PsCustomObject]@{
   PsTypeName = "cliHelper.logger.demo"
   Logger     = New-Logger -Level Debug
+  Version    = [Version]'0.1.1'
 }
 $demo.PsObject.Methods.Add([psscriptmethod]::new('InvokeFailingAction', {
       try {
@@ -46,23 +47,24 @@ try {
   [Logger]::Default = $demo.Logger
   $logPath = [string][Logger]::Default.logdir
 
+  # 2. You also save logs to json files
   Add-JsonAppender
-  Write-LogEntry -Level Info -Message "Application started in directory: $logPath"
+  Write-LogEntry -Level Info -Message "App started in directory: $logPath"
   Write-LogEntry -Level Debug -Message "Configuration loaded."
 
-  # Simulate an operation
+  # 3. Simulate an operation
   $user = "TestUser"
   Write-LogEntry -Level Debug -Message "Processing request for user: $user"
 
-  # Simulate an error
+  # 4. Simulate an error
   $demo.InvokeFailingAction()
 
   Write-LogEntry -Level Warn -Message "Operation completed with warnings."
   Write-Host "Check logs in $logPath"
 } finally {
   Read-LogEntries -Type Json # same as: $demo.Logger.ReadEntries(@{ type = "json" })
-  # 2. IMPORTANT: Dispose the logger to flush buffers and release file handles
-  # $logger.Dispose()
+  # 5. IMPORTANT: Dispose the logger to flush buffers and release file handles
+  $demo.Logger.Dispose()
 }
 ```
 
@@ -76,7 +78,7 @@ Read the docs for [In-depth Usage examples](docs/Readme.md).
 
     Use a `try...finally` block to ensure its always called.
 
-    Failure to call `$logger.Dispose()` can lead to:
+    Failure to call `.Dispose()` can lead to:
       *   Log messages not being written to files (still stuck in buffers).
       *   File locks being held, preventing other processes (or even later runs of your script) from accessing the log files.
 
