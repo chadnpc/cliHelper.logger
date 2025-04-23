@@ -1,9 +1,9 @@
 ﻿function Read-LogEntries {
-  [CmdletBinding()][OutputType([LogEntry[]] )]
+  [CmdletBinding()][OutputType([LogEntries] )]
   param (
-    [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+    [Parameter(Mandatory = $false, ValueFromPipeline = $true)]
     [Alias('l')][ValidateNotNull()]
-    [Logger]$Logger,
+    [Logger]$Logger = [Logger]::Default,
 
     # LogEntry type
     [Parameter(Mandatory = $false, Position = 1)]
