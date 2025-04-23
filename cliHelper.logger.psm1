@@ -56,6 +56,7 @@ class LogEntry {
 }
 
 class LogEntries : PsReadOnlySet {
+  LogEntries() : base(@()) {}
   LogEntries([LogEntry[]]$array) : base($array) {}
 
   [LogEntry[]] SortBy([string]$PropertyName) {
@@ -271,14 +272,21 @@ class LogFiles : HashSet[FileInfo] {
 }
 
 class LogAppenders : PsReadOnlySet {
-  LogAppenders([LogAppender[]]$array) : base($array) {}
+  LogAppenders() : base(@()) { $this._init_() }
+  LogAppenders([LogAppender[]]$array) : base($array) { $this._init_() }
+  hidden [void] _init_() {
+    $this.PsObject.Properties.Add([psscriptproperty]::new('Name', { return $this.GetEnumerator().ForEach({ $_._name }) }))
+  }
+  [LogAppender[]] ToArray() {
+    return $this.GetEnumerator() | Select-Object
+  }
 }
 
 class Logsession : IDisposable {
   [ValidateNotNull()][ConfigFile] $File                     # Handles the config file persistence
   hidden [ValidateNotNull()][LogFiles] $_logFiles = @{}     # Paths of associated log files created in this session
   hidden [ValidateNotNull()][Type] $_logType = [LogEntry]   # Runtime type object
-  hidden [ValidateNotNull()][LogAppenders] $_logAppenders = [LogAppenders]::Empty
+  hidden [ValidateNotNull()][LogAppenders] $_logAppenders = @{}
   hidden [ValidateNotNull()][DirectoryInfo] $_logdir
   hidden [bool] $IsDisposed
 
@@ -541,11 +549,12 @@ class Logger : PsModuleBase, IDisposable {
   [void] AddLogAppender([LogAppender]$LogAppender) {
     if ($this.Session._logAppenders.Count -gt 0) {
       if ($this.Session._logAppenders._name.Contains($LogAppender._name)) {
-        throw [InvalidOperationException]::new("$LogAppender is already added")
-        # return
+        Write-Verbose -Message "Skipped invalid Operation: $LogAppender was already added"
+        return
       }
     }
-    $this.Session._logAppenders += $LogAppender
+    [LogAppender[]]$a = $this.Session._logAppenders.ToArray() + $LogAppender
+    $this.Session._logAppenders = [LogAppenders]::new($a)
   }
   [LogEntry] CreateEntry([LogLevel]$severity, [string]$message) {
     return $this.CreateEntry($severity, $message, $null)
