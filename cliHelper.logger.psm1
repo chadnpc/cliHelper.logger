@@ -251,8 +251,19 @@ class LogFiles : System.Collections.Generic.HashSet[IO.FileInfo] {
 }
 
 class LogEntries : PsReadOnlySet {
-  # props..
   LogEntries([LogEntry[]]$e) : base($e) {}
+
+  [LogEntry[]] SortBy([string]$PropertyName) {
+    return $this.SortBy($PropertyName, $true)
+  }
+  [LogEntry[]] SortBy([string]$PropertyName, [bool]$descending) {
+    $validnames = [LogEntry].GetProperties().Name
+    if ($PropertyName -notin $validnames) {
+      $values_array = '@("{0}")' -f $($validnames -join '", "')
+      throw [ArgumentException]::new("Name is invalid. provide one of $values_array and try again.", 'PropertyName')
+    }
+    return $this.ToSortedList($PropertyName, $descending).Values
+  }
 }
 
 class Logsession : IDisposable {
