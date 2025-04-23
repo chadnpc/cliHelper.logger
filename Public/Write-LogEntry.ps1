@@ -43,7 +43,7 @@ function Write-LogEntry {
     [LogEntry]$LogEntry,
 
     [Parameter(Mandatory = $true, ParameterSetName = 'm')]
-    [Alias('msg')]
+    [Alias('m', 'msg')]
     [string]$Message,
 
     [Parameter(Mandatory = $false, ParameterSetName = 'm')]
@@ -52,7 +52,7 @@ function Write-LogEntry {
 
     [Parameter(Mandatory = $false, ParameterSetName = 'm')]
     [Alias('e')][AllowNull()]
-    [System.Exception]$Exception # Optional Exception parameter
+    [Exception]$Exception # Optional Exception parameter
   )
 
   Process {
