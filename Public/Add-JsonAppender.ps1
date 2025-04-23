@@ -28,9 +28,9 @@
     [string]$FileName = "log_$(Get-Date -Format 'yyyyMMdd-HHmmss')-$(New-Guid).json",
 
     # The logger instance (created via New-Logger or directly) to modify.
-    [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+    [Parameter(Mandatory = $false, ValueFromPipeline = $true)]
     [Alias('l')][ValidateNotNull()]
-    [Logger]$Logger
+    [Logger]$Logger = [Logger]::Default
   )
 
   Process {
