@@ -18,39 +18,49 @@ The easiest way to get started with scripts or interactive sessions:
 # Import the module
 Import-Module cliHelper.logger
 
-# 1. Create a logger instance with Console and File appenders (defaults)
-$logger = New-Logger -Level Debug
+# 1. Create a logger instance and make it the default
+$demo = [PsCustomObject]@{
+  PsTypeName = "cliHelper.logger.demo"
+  Logger     = New-Logger -Level Debug
+}
+$demo.PsObject.Methods.Add([psscriptmethod]::new('InvokeFailingAction', {
+      try {
+        Get-Item -Path "C:\NonExistentFile.txt" -ea Stop
+      } catch {
+        $this.Logger | Write-LogEntry -level Error -Message "Failed to access critical file." -Exception $_.Exception
+      }
+    }
+  )
+)
+```
 
-<# Anything below debug level (0) won't be logged. see:
+```PowerShell
+# Anything below debug (0) won't be recorded. :
 [LogLevel[]][Enum]::GetNames[LogLevel]() | % {
   [PsCustomObject]@{ Name = $_ ; value = $_.value__ }
 }
-#>
 ```
 
 ```PowerShell
 try {
-  $logPath = [string]$logger.Logdir
+  [Logger]::Default = $demo.Logger
+  $logPath = [string][Logger]::Default.logdir
 
-  $logger | Add-JsonAppender
-  $logger | Write-LogEntry -Level Info -Message "Application started in directory: $logPath"
-  $logger | Write-LogEntry -Level Debug -Message "Configuration loaded."
+  Add-JsonAppender
+  Write-LogEntry -Level Info -Message "Application started in directory: $logPath"
+  Write-LogEntry -Level Debug -Message "Configuration loaded."
 
   # Simulate an operation
   $user = "TestUser"
-  Write-LogEntry -l $logger -level Debug -Message "Processing request for user: $user"
+  Write-LogEntry -Level Debug -Message "Processing request for user: $user"
 
   # Simulate an error
-  try {
-    Get-Item -Path "C:\NonExistentFile.txt" -ea Stop
-  } catch {
-    # Log the error with the exception details
-    $logger | Write-LogEntry -level Error -Message "Failed to access critical file." -Exception $_.Exception
-  }
-  Write-LogEntry -l $logger -level Warn -Message "Operation completed with warnings."
+  $demo.InvokeFailingAction()
+
+  Write-LogEntry -Level Warn -Message "Operation completed with warnings."
   Write-Host "Check logs in $logPath"
 } finally {
-  $logger.ReadEntries(@{ type = "json" })
+  Read-LogEntries -Type Json # same as: $demo.Logger.ReadEntries(@{ type = "json" })
   # 2. IMPORTANT: Dispose the logger to flush buffers and release file handles
   # $logger.Dispose()
 }
