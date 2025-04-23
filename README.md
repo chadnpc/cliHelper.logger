@@ -100,7 +100,7 @@ try {
   # 4. Failing command
   $demo.SimulateCommand("Failing")
   Write-LogEntry -Level Warn -Message "Operation completed with warnings."
-  Write-LogEntry "Logs saved in $logPath"
+  Write-LogEntry -Message "Logs saved in $logPath"
 } finally {
   Read-LogEntries -Type Json # same as: $demo.Logger.ReadEntries(@{ type = "json" })
   # 5. IMPORTANT: Dispose the logger to flush buffers and release file handles
