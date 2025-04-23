@@ -10,57 +10,96 @@ A thread-safe, in-memory and file-based logging module for PowerShell.
 Install-Module cliHelper.logger
 ```
 
-## Usage
+## Usage demo
 
-The easiest way to get started with scripts or interactive sessions:
+To get started:
+
+  1. In an interactive pwsh session
+
+  ```PowerShell
+  Import-Module cliHelper.logger
+  ```
+  or
+
+  2. In your script? Add:
+
+  ```PowerShell
+  #Requires -Modules cliHelper.logger, othermodulename...
+  ```
+
+Then
 
 ```PowerShell
-# Import the module
-Import-Module cliHelper.logger
-
-# 1. Create a logger instance and make it the default
+# 1. Create a logger instance
 $demo = [PsCustomObject]@{
   PsTypeName = "cliHelper.logger.demo"
   Logger     = New-Logger -Level Debug
   Version    = [Version]'0.1.1'
 }
-$demo.PsObject.Methods.Add([psscriptmethod]::new('InvokeFailingAction', {
-      try {
-        Get-Item -Path "C:\NonExistentFile.txt" -ea Stop
-      } catch {
-        $this.Logger | Write-LogEntry -level Error -Message "Failed to access critical file." -Exception $_.Exception
+$demo.PsObject.Methods.Add([psscriptmethod]::new('SimulateCommand', {
+      Param(
+        [Parameter(Mandatory = $true)]
+        [validateset('Success', 'Failing')]
+        [string]$type
+      )
+
+      If($type -eq 'Success') {
+        Write-Host "Getting username ..." -NoNewline;
+        [Threading.Thread]::Sleep(2000); " Done"
+        return [IO.Path]::Join(
+          [Environment]::UserDomainName,
+          [Environment]::UserName
+        )
       }
+      $file = [IO.FileInfo]::new("C:\NonExistentFile.txt")
+      try {
+        Write-Host "Getting $file ..." -NoNewline;
+        [Threading.Thread]::Sleep(1000);
+        Get-Item $file -ea Stop
+        " Done!"
+      } catch {
+        $this.Logger | Write-LogEntry -l Error -m `
+        "Failed to access $($file.Name)" -e $_.Exception
+      }
+      return $file
     }
   )
 )
 ```
 
 ```PowerShell
-# Anything below debug (0) won't be recorded. :
-[LogLevel[]][Enum]::GetNames[LogLevel]() | % {
-  [PsCustomObject]@{ Name = $_ ; value = $_.value__ }
-}
+# Anything below level 1 (INFO) won't be recorded. i.e:
+ Name value
+ ---- -----
+DEBUG     0
+ INFO     1
+ WARN     2
+ERROR     3
+FATAL     4
+
+# - It means in this case, DEBUG lines won't show in logs
+# - Table from: [LogLevel[]][Enum]::GetNames[LogLevel]() | % { [PsCustomObject]@{ Name = $_ ; value = $_.value__ } }
 ```
 
 ```PowerShell
 try {
+  # set it the default (OPTIONAL If you are in a pwsh terminal)
   [Logger]::Default = $demo.Logger
   $logPath = [string][Logger]::Default.logdir
 
   # 2. You also save logs to json files
   Add-JsonAppender
-  Write-LogEntry -Level Info -Message "App started in directory: $logPath"
+  Write-LogEntry -Level Info  -Message "App started in directory: $logPath"
   Write-LogEntry -Level Debug -Message "Configuration loaded."
 
-  # 3. Simulate an operation
-  $user = "TestUser"
+  # 3. success command
+  $user = $demo.SimulateCommand("Success")
   Write-LogEntry -Level Debug -Message "Processing request for user: $user"
 
-  # 4. Simulate an error
-  $demo.InvokeFailingAction()
-
+  # 4. Failing command
+  $demo.SimulateCommand("Failing")
   Write-LogEntry -Level Warn -Message "Operation completed with warnings."
-  Write-Host "Check logs in $logPath"
+  Write-LogEntry "Logs saved in $logPath"
 } finally {
   Read-LogEntries -Type Json # same as: $demo.Logger.ReadEntries(@{ type = "json" })
   # 5. IMPORTANT: Dispose the logger to flush buffers and release file handles
