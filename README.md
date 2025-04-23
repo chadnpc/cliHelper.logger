@@ -12,29 +12,30 @@ Install-Module cliHelper.logger
 
 ## Usage demo
 
-To get started:
+Get started:
 
   1. In an interactive pwsh session
 
-  ```PowerShell
-  Import-Module cliHelper.logger
-  ```
-  or
+      ```PowerShell
+      Import-Module cliHelper.logger
+      ```
+      or
 
   2. In your script? Add:
 
-  ```PowerShell
-  #Requires -Modules cliHelper.logger, othermodulename...
-  ```
+      ```PowerShell
+      #Requires -Modules cliHelper.logger, othermodulename...
+      ```
 
 Then
 
 ```PowerShell
-# 1. Create a logger instance
+# 1. usage in an object
 $demo = [PsCustomObject]@{
-  PsTypeName = "cliHelper.logger.demo"
-  Logger     = New-Logger -Level Debug
-  Version    = [Version]'0.1.1'
+  PsTypeName  = "cliHelper.logger.demo"
+  Description = "Shows how a logger instance is used with cmdlets"
+  Version     = [Version]'0.1.1'
+  Logger      = New-Logger -Level Debug
 }
 $demo.PsObject.Methods.Add([psscriptmethod]::new('SimulateCommand', {
       Param(
@@ -45,23 +46,23 @@ $demo.PsObject.Methods.Add([psscriptmethod]::new('SimulateCommand', {
 
       If($type -eq 'Success') {
         Write-Host "Getting username ..." -NoNewline;
-        [Threading.Thread]::Sleep(2000); " Done"
+        [Threading.Thread]::Sleep(2000);
+        Write-Host " Done" -f Green
         return [IO.Path]::Join(
           [Environment]::UserDomainName,
           [Environment]::UserName
         )
       }
-      $file = [IO.FileInfo]::new("C:\NonExistentFile.txt")
+      $file = "C:\fake-dir{0}\NonExistentFile.txt" -f (Get-Random -Max 100000000).ToString("D9")
       try {
-        Write-Host "Getting $file ..." -NoNewline;
+        Write-Host "Getting $file ...";
         [Threading.Thread]::Sleep(1000);
         Get-Item $file -ea Stop
-        " Done!"
+        Write-Host " Done!" -f Green
       } catch {
-        $this.Logger | Write-LogEntry -l Error -m `
-        "Failed to access $($file.Name)" -e $_.Exception
+        $this.Logger | fl * -Force | out-string | write-verbose
+        $this.Logger | Write-LogEntry -l Error -m "Failed to access $([IO.Path]::GetFileName($file))" -e $_.Exception
       }
-      return $file
     }
   )
 )
@@ -84,7 +85,7 @@ FATAL     4
 ```PowerShell
 try {
   # set it the default (OPTIONAL If you are in a pwsh terminal)
-  [Logger]::Default = $demo.Logger
+  $demo.Logger.set_default()
   $logPath = [string][Logger]::Default.logdir
 
   # 2. You also save logs to json files
