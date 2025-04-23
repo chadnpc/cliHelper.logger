@@ -95,7 +95,11 @@ class LogAppender : IDisposable {
         if (![string]::IsNullOrWhiteSpace($logb.Exception)) {
           # Append exception on new lines, indented for readability
           $e = ($entry.Exception.ToString() -split '\r?\n' | ForEach-Object { "  $_" }) -join "`n"
-          $l += "`n$e"
+          if ($atype -eq "CONSOLE" -and (Get-Variable ErrorActionPreference).Value -in ("Ignore", "SilentlyContinue")) {
+            # keep the console log clean :)
+          } else {
+            $l += "`n$e"
+          }
         }
         $l;
         break
