@@ -7,6 +7,7 @@
 
     # LogEntry type
     [Parameter(Mandatory = $false, Position = 1)]
+    [Alias('t')]
     [LogAppenderType]$Type = 'JSON'
   )
 
