@@ -32,10 +32,11 @@ function Write-LogEntry {
     https://github.com/chadnpc/cliHelper.logger/blob/main/Public/Write-LogEntry.ps1
   #>
   [CmdletBinding(DefaultParameterSetName = 'm')]
+  [Alias('Register-LogEntry')]
   param(
-    [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+    [Parameter(Mandatory = $false, ValueFromPipeline = $true)]
     [Alias('l')][ValidateNotNull()]
-    [Logger]$Logger,
+    [Logger]$Logger = [Logger]::Default,
 
     [Parameter(Mandatory = $true, ParameterSetName = 'e')]
     [Alias('entry')][ValidateNotNull()]
