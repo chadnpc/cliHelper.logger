@@ -250,18 +250,9 @@ class LogFiles : System.Collections.Generic.HashSet[IO.FileInfo] {
   }
 }
 
-class LogEntries : ReadOnlySet[LogEntry] {
+class LogEntries : PsReadOnlySet {
   # props..
-  LogEntries([LogEntry[]]$e) : base($this.new_set($e)) {}
-  hidden [ISet[LogEntry]] new_set([LogEntry[]]$e) {
-    $hs = [HashSet[LogEntry]]::new(); $e.ForEach({ $hs.Add($_) })
-    return $hs
-  }
-  [ArrayList] ToArray() {
-    $l = [ArrayList]::new()
-    $this.FullName.ForEach({ [void]$l.Add($_) })
-    return $l
-  }
+  LogEntries([LogEntry[]]$e) : base($e) {}
 }
 
 class Logsession : IDisposable {
