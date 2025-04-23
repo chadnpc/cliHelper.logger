@@ -12,6 +12,16 @@
   )
 
   process {
+    if (!$PSBoundParameters.ContainsKey('Logger')) {
+      $PSCmdlet.ThrowTerminatingError(
+        [System.Management.Automation.ErrorRecord]::new(
+          [System.InvalidOperationException]::new("Please provide a logger object"),
+          'InvalidOperationException',
+          [System.Management.Automation.ErrorCategory]::InvalidOperation,
+          $null
+        )
+      )
+    }
     return $Logger.ReadEntries($Type)
   }
 }
