@@ -35,11 +35,11 @@ function Write-LogEntry {
   [Alias('Register-LogEntry')]
   param(
     [Parameter(Mandatory = $false, ValueFromPipeline = $true)]
-    [Alias('l')][ValidateNotNull()]
+    [Alias('lo')][ValidateNotNull()]
     [Logger]$Logger = [Logger]::Default,
 
     [Parameter(Mandatory = $true, ParameterSetName = 'e')]
-    [Alias('entry')][ValidateNotNull()]
+    [Alias('le', 'entry')][ValidateNotNull()]
     [LogEntry]$LogEntry,
 
     [Parameter(Mandatory = $true, ParameterSetName = 'm')]
@@ -47,7 +47,7 @@ function Write-LogEntry {
     [string]$Message,
 
     [Parameter(Mandatory = $false, ParameterSetName = 'm')]
-    [Alias('s', 'level')]
+    [Alias('s', 'l', 'level')]
     [LogLevel]$Severity = 1,
 
     [Parameter(Mandatory = $false, ParameterSetName = 'm')]
