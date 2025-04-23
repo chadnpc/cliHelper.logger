@@ -621,14 +621,6 @@ class Logger : PsModuleBase, IDisposable {
     $files = $this.Logdir.EnumerateFiles()
     $files ? $files.ForEach({ Remove-Item $_.FullName -Force }) : $null
   }
-  [bool] ShouldLog([LogLevel]$level) {
-    return $level -ge $this.MinLevel
-  }
-  [void] Dispose() {
-    if ($this.IsDisposed) { throw [ObjectDisposedException]::new($this.GetType().Name, "Object is already disposed!") }
-    [void][GC]::SuppressFinalize($this); $this.Session.Dispose(); [Logger]::Default = $null
-    $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a ReadOnly Property") }))
-  }
   [void] Log([LogEntry]$entry) {
     if ($this.Session._logAppenders.Count -lt 1) { $this.AddLogAppender([ConsoleAppender]::new()) }
     foreach ($appender in $this.Session._logAppenders) {
@@ -643,11 +635,22 @@ class Logger : PsModuleBase, IDisposable {
     $this.Log($severity, $message, $null)
   }
   [void] Log([LogLevel]$severity, [string]$message, [Exception]$exception) {
-    if ($this.ShouldLog($severity)) {
+    if ($this.should_log($severity)) {
       $this.Log($this.CreateLogEntry($severity, $message, $exception))
       return
     }
     Write-Debug -Message "[Logger] loglevel '$severity' is Skipped. Message : $message"
+  }
+  hidden [bool] should_log([LogLevel]$level) {
+    return $level -ge $this.MinLevel
+  }
+  hidden [void] set_default() {
+    [Logger]::Default = ([ref]$this).Value
+  }
+  [void] Dispose() {
+    if ($this.IsDisposed) { throw [ObjectDisposedException]::new($this.GetType().Name, "Object is already disposed!") }
+    [void][GC]::SuppressFinalize($this); $this.Session.Dispose(); [Logger]::Default = $null
+    $this.PsObject.Properties.Add([PSScriptProperty]::new('IsDisposed', { return $true }, { throw [SetValueException]::new("Its a ReadOnly Property") }))
   }
   # --- Convenience Methods ---
   [void] Info([string]$message) { $this.Log([LogLevel]::INFO, $message) }
