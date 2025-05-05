@@ -12,7 +12,7 @@
   )
 
   process {
-    if (!$PSBoundParameters.ContainsKey('Logger')) {
+    if ($null -eq $Logger) {
       $PSCmdlet.ThrowTerminatingError(
         [System.Management.Automation.ErrorRecord]::new(
           [System.InvalidOperationException]::new("Please provide a logger object"),

@@ -10,7 +10,7 @@
   .EXAMPLE
     $logger = New-Logger
     $logger | Add-JsonAppender "app_events.json"
-    $logger.Info("JSON appender added")
+    $logger.LogInfoLine("JSON appender added")
     # ... log more ...
     $logger.Dispose()
   .LINK

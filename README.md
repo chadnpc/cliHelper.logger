@@ -35,7 +35,7 @@ $demo = [PsCustomObject]@{
   PsTypeName  = "cliHelper.logger.demo"
   Description = "Shows how a logger instance is used with cmdlets"
   Version     = [Version]'0.1.1'
-  Logger      = New-Logger -Level Debug
+  Logger      = New-Logger -Level 1
 }
 $demo.PsObject.Methods.Add([psscriptmethod]::new('SimulateCommand', {
       Param(
@@ -45,9 +45,9 @@ $demo.PsObject.Methods.Add([psscriptmethod]::new('SimulateCommand', {
       )
 
       If($type -eq 'Success') {
-        Write-Host "Getting username ..." -NoNewline;
+        $this.Logger.LogInfoLine("Getting username ...")
         [Threading.Thread]::Sleep(2000);
-        Write-Host " Done" -f Green
+        $this.Logger.LogInfoLine("Done.")
         return [IO.Path]::Join(
           [Environment]::UserDomainName,
           [Environment]::UserName
@@ -55,56 +55,53 @@ $demo.PsObject.Methods.Add([psscriptmethod]::new('SimulateCommand', {
       }
       $file = "C:\fake-dir{0}\NonExistentFile.txt" -f (Get-Random -Max 100000000).ToString("D9")
       try {
-        Write-Host "Getting $file ...";
+        $this.Logger.LogInfoLine("Getting $file ...")
         [Threading.Thread]::Sleep(1000);
         Get-Item $file -ea Stop
-        Write-Host " Done!" -f Green
+        $this.Logger.LogInfoLine("Done!")
       } catch {
-        $this.Logger | fl * -Force | out-string | write-verbose
         $this.Logger | Write-LogEntry -l Error -m "Failed to access $([IO.Path]::GetFileName($file))" -e $_.Exception
       }
     }
   )
 )
-```
+# 2. You can also save logs to json files
+$demo.Logger | Add-JsonAppender
 
-```PowerShell
-# Anything below level 1 (INFO) won't be recorded. i.e:
- Name value
- ---- -----
-DEBUG     0
- INFO     1
- WARN     2
-ERROR     3
-FATAL     4
+$demo.Logger.set_default() # (OPTIONAL) handy only when you are in a pwsh terminal.
 
-# - It means in this case, DEBUG lines won't show in logs
-# - Table from: [LogLevel[]][Enum]::GetNames[LogLevel]() | % { [PsCustomObject]@{ Name = $_ ; value = $_.value__ } }
-```
-
-```PowerShell
+# Now u don't have to pipe $demo.Logger each time u write or read logs in this session:
 try {
-  # set it the default (OPTIONAL If you are in a pwsh terminal)
-  $demo.Logger.set_default()
   $logPath = [string][Logger]::Default.logdir
+  Write-LogEntry -Level INFO -Message "app started in directory: $logPath"
+  # same as:
+  $demo.Logger.LogInfoLine("app st4rt3d in d1r3ct0ry: $logPath")
 
-  # 2. You also save logs to json files
-  Add-JsonAppender
-  Write-LogEntry -Level Info  -Message "App started in directory: $logPath"
-  Write-LogEntry -Level Debug -Message "Configuration loaded."
+  Write-LogEntry -Level Debug -Message "Configuration loaded." # Note: this logline will be skipped!
+  # ie: in this case anything below level 1 (INFO) won't be recorded, since [int]$demo.Logger.MinLevel -eq 1
+
+  #  Name value
+  #  ---- -----
+  # DEBUG     0
+  #  INFO     1
+  #  WARN     2
+  # ERROR     3
+  # FATAL     4
+  # - that means, only DEBUG lines won't show in logs
+  # - Table from command: [LogLevel[]][Enum]::GetNames[LogLevel]() | % { [PsCustomObject]@{ Name = $_ ; value = $_.value__ } }
 
   # 3. success command
   $user = $demo.SimulateCommand("Success")
-  Write-LogEntry -Level Debug -Message "Processing request for user: $user"
+  Write-LogEntry -Level INFO -Message "Processing request for user: $user"
 
   # 4. Failing command
   $demo.SimulateCommand("Failing")
-  Write-LogEntry -Level Warn -Message "Operation completed with warnings."
+  Write-LogEntry -Level 2 -Message "Operation completed with warnings."
   Write-LogEntry -Message "Logs saved in $logPath"
 } finally {
   Read-LogEntries -Type Json # same as: $demo.Logger.ReadEntries(@{ type = "json" })
   # 5. IMPORTANT: Dispose the logger to flush buffers and release file handles
-  $demo.Logger.Dispose()
+  # $demo.Logger.Dispose()
 }
 ```
 

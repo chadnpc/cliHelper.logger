@@ -60,11 +60,11 @@ function Write-LogEntry {
       if ($PSCmdlet.ParameterSetName -eq "m") {
         #HACK: For now, rely on the logger's internal checks or catch potential NullReferenceExceptions if methods fail.
         switch ($Severity) {
-          "DEBUG" { $Logger.Debug($Message); break }
-          "INFO" { $Logger.Info($Message); break }
-          "WARN" { $Logger.Warn($Message); break }
-          "ERROR" { $Logger.Error($Message, $Exception); break }
-          "FATAL" { $Logger.Fatal($Message, $Exception); break }
+          "DEBUG" { $Logger.LogDebugLine($Message); break }
+          "INFO" { $Logger.LogInfoLine($Message); break }
+          "WARN" { $Logger.LogWarnLine($Message); break }
+          "ERROR" { $Logger.LogErrorLine($Message, $Exception); break }
+          "FATAL" { $Logger.LogFatalLine($Message, $Exception); break }
           Default {
             throw [System.Exception]::new("Unhandled LogLevel: $Severity")
           }

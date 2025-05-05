@@ -32,9 +32,9 @@ function New-Logger {
     Example:
     $logger = New-Logger
     try {
-      $logger.Info("Starting process...")
+      $logger.LogInfoLine("Starting process...")
       # ... your code ...
-      $logger.Info("Process finished.")
+      $logger.LogInfoLine("Process finished.")
     }
     finally {
       $logger.Dispose()

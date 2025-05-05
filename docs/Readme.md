@@ -19,7 +19,7 @@
     $logger | Add-JsonAppender
     $logger | Write-LogEntry -level Info -Message "Added JSON appender.
     Logs now go to Console, `$env:TMP/MyAppLog/*{guid-filename}.log, and .json"
-    $logger.Info("This message goes to all appenders.") # Direct call
+    $logger.LogInfoLine("This message goes to all appenders.") # Direct call
   } finally {
     $logger.ReadEntries(@{ type = "JSON" })
     $logger.Dispose()
@@ -44,14 +44,14 @@
     $logger.AddLogAppender([FileAppender]"$Logdir/mytool.log")
     $logger.AddLogAppender([JsonAppender]"$Logdir/mytool_metrics.json")
 
-    $logger.Info("Object Logger Initialized. with $($logger.Session.LogAppenders.Count) appenders.")
+    $logger.LogInfoLine("Object Logger Initialized. with $($logger.Session.LogAppenders.Count) appenders.")
     $logger.Debug("Detailed trace message.")
     # simulated failure:
     throw [System.IO.FileNotFoundException]::new("Required config file missing", "config.xml")
   } catch {
-    $logger.Fatal(("{0} :`n  {1}" -f $_.FullyQualifiedErrorId, $_.ScriptStackTrace), $_.Exception)
+    $logger.LogFatalLine(("{0} :`n  {1}" -f $_.FullyQualifiedErrorId, $_.ScriptStackTrace), $_.Exception)
   } finally {
-    $logger.Info("Check logs in $($logger.LogFiles)")
+    $logger.LogInfoLine("Check logs in $($logger.LogFiles)")
     $logger.Dispose()
   }
   ```
@@ -87,12 +87,12 @@
   try {
     $logger = [Logger]::new()
     $logger.LogType = [CustomEntry]
-    $logger.Info("Logging event with custom entry type.")
-    $logger.Info("By default, If no LogAppender is added, Logs will only show in the console (like this).")
+    $logger.LogInfoLine("Logging event with custom entry type.")
+    $logger.LogInfoLine("By default, If no LogAppender is added, Logs will only show in the console (like this).")
   } finally {
     $logger.Dispose()
   }
-  $logger.Info("Trying to log something else...")
+  $logger.LogInfoLine("Trying to log something else...")
   # this should throw an error:
   # OperationStopped: Cannot access a disposed object.
   # Object name: 'ConsoleAppender is already disposed'.
