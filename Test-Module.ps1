@@ -1,10 +1,10 @@
 ﻿
 #!/usr/bin/env pwsh
 # .SYNOPSIS
-#   cliHelper.logger testScript v0.1.1
+#   cliHelper.logger testScript v0.1.2
 # .EXAMPLE
-#   ./Test-Module.ps1 -version 0.1.1
-#   Will test the module in ./BuildOutput/cliHelper.logger/0.1.1/
+#   ./Test-Module.ps1 -version 0.1.2
+#   Will test the module in ./BuildOutput/cliHelper.logger/0.1.2/
 # .EXAMPLE
 #   ./Test-Module.ps1
 #   Will test the latest  module version in ./BuildOutput/cliHelper.logger/

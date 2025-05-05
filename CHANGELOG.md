@@ -1,6 +1,6 @@
 # changelog
 
-## [3/15/2025] v0.1.1 - Initial Release
+## [3/15/2025] v0.1.2 - Initial Release
 
 ### Core Components
 - [Logger] class with session management

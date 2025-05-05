@@ -1,9 +1,9 @@
 ﻿@{
   ModuleName        = 'cliHelper.logger'
-  ModuleVersion     = '0.1.1'
+  ModuleVersion     = '0.1.2'
   AppDataFolderName = 'pwsh.logging'
   ReleaseNotes      = @'
-# cliHelper.logger v0.1.1 Release Notes
+# cliHelper.logger v0.1.2 Release Notes
 
 ## Initial Release Features
 

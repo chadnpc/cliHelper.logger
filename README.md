@@ -34,7 +34,7 @@ Then
 $demo = [PsCustomObject]@{
   PsTypeName  = "cliHelper.logger.demo"
   Description = "Shows how a logger instance is used with cmdlets"
-  Version     = [Version]'0.1.1'
+  Version     = [Version]'0.1.2'
   Logger      = New-Logger -Level 1
 }
 $demo.PsObject.Methods.Add([psscriptmethod]::new('SimulateCommand', {
